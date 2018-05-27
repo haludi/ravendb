@@ -24,7 +24,7 @@ namespace Raven.Server.Indexing
             _name = name;
             _tree = tree;
             _tx = tx;
-            _fileTempPath = options.TempPath.Combine(name + "_" + Guid.NewGuid()).FullPath;
+            _fileTempPath =ne(name + "_" + Guid.NewGuid()).FullPath;
 
             if (options.EncryptionEnabled)
                 _file = new TempCryptoStream(_fileTempPath);
