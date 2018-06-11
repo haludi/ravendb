@@ -595,7 +595,7 @@ namespace Raven.Server.Documents.Replication
                 return _replicationBatchReply.CurrentEtag > lastReceivedEtag;
             }
 
-            public override int Execute(DocumentsOperationContext context)
+            protected override int ExecuteCmd(DocumentsOperationContext context)
             {
                 if (string.IsNullOrEmpty(context.LastDatabaseChangeVector))
                     context.LastDatabaseChangeVector = DocumentsStorage.GetDatabaseChangeVector(context);

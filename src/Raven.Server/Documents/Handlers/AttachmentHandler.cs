@@ -265,7 +265,7 @@ namespace Raven.Server.Documents.Handlers
             public Stream Stream;
             public string Hash;
 
-            public override int Execute(DocumentsOperationContext context)
+            protected override int ExecuteCmd(DocumentsOperationContext context)
             {
                 try
                 {
@@ -288,7 +288,7 @@ namespace Raven.Server.Documents.Handlers
             public DocumentDatabase Database;
             public ExceptionDispatchInfo ExceptionDispatchInfo;
 
-            public override int Execute(DocumentsOperationContext context)
+            protected override int ExecuteCmd(DocumentsOperationContext context)
             {
                 try
                 {

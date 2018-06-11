@@ -921,7 +921,7 @@ namespace Raven.Server.Documents.Replication
                 _trigger = trigger;
             }
 
-            public override int Execute(DocumentsOperationContext context)
+            protected override int ExecuteCmd(DocumentsOperationContext context)
             {
                 var operationsCount = 0;
                 var lastReplicatedEtag = DocumentsStorage.GetLastReplicatedEtagFrom(context, _sourceDatabaseId);
@@ -972,7 +972,7 @@ namespace Raven.Server.Documents.Replication
                 _lastEtag = lastEtag;
             }
 
-            public override int Execute(DocumentsOperationContext context)
+            protected override int ExecuteCmd(DocumentsOperationContext context)
             {
                 try
                 {
