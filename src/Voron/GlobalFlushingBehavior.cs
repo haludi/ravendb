@@ -6,6 +6,7 @@ using System.Threading;
 using Sparrow;
 using Sparrow.Logging;
 using Sparrow.Utils;
+using Voron.Global;
 using Voron.Impl.Journal;
 
 namespace Voron
@@ -119,7 +120,7 @@ namespace Voron
                     continue;
 
                 if (force == false && envSyncReq.Value.IsRequired == false &&
-                   env.Journal.Applicator.TotalWrittenButUnsyncedBytes < env.Options.JournalsSizeThreshold)
+                   env.Journal.Applicator.TotalWrittenButUnsyncedBytes < 128 * Constants.Size.Megabyte)
                     continue;
 
                 if (_envsToSync.TryRemove(envSyncReq.Key, out _) == false)
