@@ -14,7 +14,7 @@ namespace Voron
     public class GlobalFlushingBehavior
     {
         private const string FlushingThreadName = "Voron Global Flushing Thread";
-        
+
         internal static readonly Lazy<GlobalFlushingBehavior> GlobalFlusher = new Lazy<GlobalFlushingBehavior>(() =>
         {
             var flusher = new GlobalFlushingBehavior();
@@ -30,6 +30,7 @@ namespace Voron
         private class EnvSyncReq
         {
             public StorageEnvironment Env => Reference?.Owner;
+            public int IsSyncRun;
             public StorageEnvironment.IndirectReference Reference;
             public bool IsRequired;
         }
@@ -67,7 +68,7 @@ namespace Voron
                 while (true)
                 {
                     avoidDuplicates.Clear();
-                 
+                    
                     if (_flushWriterEvent.Wait(5000) == false)
                     {
                         if (_envsToSync.Count == 0)
@@ -78,8 +79,7 @@ namespace Voron
                             _log.Info($"Starting force sync with {_envsToSync.Count:#,#} items to sync after a period of no activity");
                         }
 
-                        // sync after 5 seconds if no flushing occurred, or if there has been a LOT of
-                        // writes that we would like to run
+                        // sync after 5 seconds if no flushing occurred
                         SyncEnvironments(force: true);
                         continue;
                     }
@@ -108,13 +108,16 @@ namespace Voron
             // ReSharper disable once FunctionNeverReturns
         }
 
-        private void SyncEnvironments( bool force)
+        private void SyncEnvironments(bool force)
         {
             foreach (var envSyncReq in _envsToSync)
             {
                 var env = envSyncReq.Key.Owner;
                 if (env == null)
+                {
+                    _envsToSync.TryRemove(envSyncReq.Key, out _);
                     continue;
+                }
 
                 if (env.Disposed)
                     continue;
@@ -123,7 +126,8 @@ namespace Voron
                    env.Journal.Applicator.TotalWrittenButUnsyncedBytes < 128 * Constants.Size.Megabyte)
                     continue;
 
-                if (_envsToSync.TryRemove(envSyncReq.Key, out _) == false)
+                var exchange = Interlocked.Exchange(ref envSyncReq.Value.IsSyncRun, 1);
+                if (exchange == 1)
                     continue;
 
                 var mpi = _mountPoints.GetOrAdd(env.Options.DataPager.UniquePhysicalDriveId,
@@ -138,18 +142,18 @@ namespace Voron
 
                 for (int i = 0; i < parallelSyncsPerIo; i++)
                 {
-                    ThreadPool.QueueUserWorkItem(SyncAllEnvironmentsInMountPoint, mountPoint.Value); 
+                    ThreadPool.QueueUserWorkItem(SyncAllEnvironmentsInMountPoint, mountPoint.Value);
                 }
             }
         }
-        
+
         private void SyncAllEnvironmentsInMountPoint(object mt)
         {
             var mountPointInfo = (MountPointInfo)mt;
-            EnvSyncReq req;
-            while (mountPointInfo.StorageEnvironments.TryDequeue(out req))
+            while (mountPointInfo.StorageEnvironments.TryDequeue(out var req))
             {
                 SyncEnvironment(req);
+                _envsToSync.TryRemove(req.Reference, out _);
             }
         }
 
