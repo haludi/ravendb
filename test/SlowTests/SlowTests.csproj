@@ -134,7 +134,4 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="copy &quot;$(ProjectDir)..\..\src\librvnpal\librvnpal.x64.dll&quot; &quot;$(TargetDir)\librvnpal.dll&quot;" />
-  </Target>
 </Project>
