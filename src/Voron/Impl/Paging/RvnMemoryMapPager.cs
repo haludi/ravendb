@@ -26,11 +26,11 @@ namespace Voron.Impl.Paging
         private readonly bool _copyOnWriteMode;
         private readonly Logger _logger;
         private readonly SafeMmapHandle _handle;
-        internal FileCloseFlags IsDeleteOnClose => DeleteOnClose ? PalFlags.FileCloseFlags.DeleteOnClose : PalFlags.FileCloseFlags.None;
 
-        public RvnMemoryMapPager(StorageEnvironmentOptions options, VoronPathSetting file, long? initialFileSize = null, bool canPrefetchAhead = true, bool usePageProtection = false)
+        public RvnMemoryMapPager(StorageEnvironmentOptions options, VoronPathSetting file, long? initialFileSize = null, bool canPrefetchAhead = true, bool usePageProtection = false, bool deleteOnClose = false)
             : base(options, canPrefetchAhead, usePageProtection)
         {
+            DeleteOnClose = deleteOnClose;
             FileName = file;
             _copyOnWriteMode = options.CopyOnWriteMode && FileName.FullPath.EndsWith(Constants.DatabaseFilename);
             _logger = LoggingSource.Instance.GetLogger<StorageEnvironment>($"Pager-{file}");
@@ -42,15 +42,18 @@ namespace Voron.Impl.Paging
 
             Debug.Assert(file != null);
 
-            var rc = RvnCreateAndMmap64File(
+            var mmapOptions = _copyOnWriteMode ? MmapOptions.CopyOnWrite : MmapOptions.None;
+            if (DeleteOnClose)
+                mmapOptions &= MmapOptions.DeleteOnClose;
+
+            var rc = rvn_create_and_mmap64_file(
                 file.FullPath,
                 initialFileSize.Value,
-                _copyOnWriteMode ? MmapOptions.CopyOnWrite : MmapOptions.None,
+                mmapOptions,
                 out _handle,
                 out var baseAddress,
                 out _totalAllocationSize,
-                out var errorCode,
-                this);
+                out var errorCode);
 
             if (rc != FailCodes.Success)
             {
@@ -120,7 +123,7 @@ namespace Voron.Impl.Paging
         {
             base.ReleaseAllocationInfo(baseAddress, size);
 
-            var rc = rvn_unmap(baseAddress, size, IsDeleteOnClose, out var errorCode);
+            var rc = rvn_unmap(_handle, baseAddress, size, out var errorCode);
             if (rc != FailCodes.Success)
                 PalHelper.ThrowLastError(rc, errorCode,
                     $"Failed to unmap {FileName.FullPath}. DeleteOnClose={DeleteOnClose}");
@@ -130,10 +133,11 @@ namespace Voron.Impl.Paging
 
         protected override void DisposeInternal()
         {
-            var rc = rvn_mmap_dispose_handle(FileName.FullPath, _handle, IsDeleteOnClose, out var errorCode);
+            GC.SuppressFinalize(_handle);
+            var rc = rvn_mmap_dispose_handle(_handle, out var errorCode);
             if (rc == 0) 
                 return;
-            
+            GC.ReRegisterForFinalize(_handle);
             // rc != success, we cannot delete the file probably, and there's nothing much we can do here.
             // just add to log and continue            
             if (_logger.IsInfoEnabled)
@@ -233,7 +237,6 @@ namespace Voron.Impl.Paging
 
     public class SafeMmapHandle : SafeHandle
     {
-        public RvnMemoryMapPager Pager;
         public FailCodes FailCode;
         public int ErrorNo;
 
@@ -243,7 +246,7 @@ namespace Voron.Impl.Paging
 
         protected override bool ReleaseHandle()
         {
-            FailCode = Pal.rvn_mmap_dispose_handle(Pager.FileName.FullPath, this, Pager.IsDeleteOnClose, out var ErrorNo);
+            FailCode = Pal.rvn_mmap_dispose_handle(this,  out ErrorNo);
 
             return FailCode == FailCodes.Success;
         }

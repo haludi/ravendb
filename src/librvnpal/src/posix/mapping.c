@@ -15,6 +15,13 @@
 #include "status_codes.h"
 #include "internal_posix.h"
 
+struct map_file_handle
+{
+    int fd;
+    const char* path;
+    int flags;
+};
+
 EXPORT int32_t
 rvn_create_and_mmap64_file(const char *path,
                            int64_t initial_file_size,
@@ -29,10 +36,19 @@ rvn_create_and_mmap64_file(const char *path,
     assert(initial_file_size > 0);
 
     _ensure_path_exists(path);
+      
+    struct map_file_handle* map = calloc(sizeof(struct map_file_handle));
+    if(map == NULL)
+    {
+        rc = FAIL_CALLOC;
+        goto error_cleanup;
+    }
+    map->flags = flags;
+    map->path = strdup(path);
+    map->fd = open(path, O_RDWR | O_CREAT, S_IWUSR | S_IRUSR);
 
-    int32_t fd = open(path, O_RDWR | O_CREAT, S_IWUSR | S_IRUSR);
-    *handle = (void*)(int64_t)fd;
-    if (fd == -1)
+    *handle = (void*)(int64_t)map;
+    if (map->fd == -1)
     {
         rc = FAIL_OPEN_FILE;
         goto error_cleanup;
@@ -115,7 +131,7 @@ rvn_allocate_more_space(const char *file_name, int64_t new_length_after_adjustme
 
     if (_sync_directory_allowed(fd) == SYNC_DIR_ALLOWED)
     {
-        rc = _sync_directory_for(filename, detailed_error_code);
+        rc = _sync_directory_for(file_name, detailed_error_code);
         if (rc != SUCCESS)
             goto error_clean_With_error;
     }
@@ -149,7 +165,7 @@ error_clean_With_error:
 EXPORT int32_t
 rvn_unmap(void *address, int64_t size, int32_t delete_on_close, int32_t *detailed_error_code)
 {    
-    if (delete_on_close == FILE_CLOSE_OPT_DELETE_ON_CLOSE)
+    if (delete_on_close == MMOPTIONS_DELETE_ON_CLOSE)
         madvise(address, size, MADV_DONTNEED); /* ignore error */        
 
     int32_t rc = munmap(address, size);
@@ -160,37 +176,44 @@ rvn_unmap(void *address, int64_t size, int32_t delete_on_close, int32_t *detaile
 }
 
 EXPORT int32_t
-rvn_mmap_dispose_handle(const char *file_path, void *handle, int32_t delete_on_close, int32_t *detailed_error_code)
+rvn_mmap_dispose_handle(void *handle, int32_t *detailed_error_code)
 {
+    map_file_handle mp = (map_file_handle*)handle;
     int32_t rc = SUCCESS;
 
-    /* the following in two lines to avoid compilation warning */
-    int32_t fd = (int32_t)(int64_t)handle;
-
-    if (fd != -1)
+    if (mp->fd == -1)
     {
-        if (delete_on_close == FILE_CLOSE_OPT_DELETE_ON_CLOSE)
-        {
-            int32_t unlink_rc = unlink(filepath);
-            if (unlink_rc != 0)
-            {
-                /* record the error and continue to close */
-                rc = FAIL_UNLINK;
-                *detailed_error_code = errno;
-            }
-        }
-
-        int32_t close_rc = close(fd);
-        if (close_rc != 0)
-        {
-            if (rc == 0) /* if unlink failed - return unlink's error */
-            {
-                rc = FAIL_CLOSE;
-                *detailed_error_code = errno;
-            }
-        }
-        return rc;
+        rc = FAIL_INVALID_HANDLE;
+        goto error_cleanup;
     }
 
-    return FAIL_INVALID_HANDLE;
+    if (mp->flags & MMOPTIONS_DELETE_ON_CLOSE)
+    {
+        int32_t unlink_rc = unlink(mp->path);
+        if (unlink_rc != 0)
+        {
+            /* record the error and continue to close */
+            rc = FAIL_UNLINK;
+            *detailed_error_code = errno;
+        }
+    }
+
+    int32_t close_rc = close(fd);
+    if (close_rc != 0)
+    {
+        if (rc == 0) /* if unlink failed - return unlink's error */
+        {
+            rc = FAIL_CLOSE;
+            *detailed_error_code = errno;
+            goto error_cleanup;
+        }
+    }
+    goto cleanup;
+
+error_cleanup:
+    *detailed_error_code = errno;
+cleanup:
+    free(mp->path);
+    free(mp);
+    return rc;
 }
