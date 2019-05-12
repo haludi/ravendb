@@ -83,7 +83,7 @@ _write_file(void* handle, const void* buffer, int64_t size, int64_t offset, int3
     if (rc == SUCCESS)
         return SUCCESS;
 
-    if (*detailed_error_code != ERROR_WORKING_SET_QUOTA)
+    if (*detailed_error_code != ERROR_WORKING_SET_QUOTA && *detailed_error_code != ERROR_INVALID_PARAMETER)
         return FAIL_WRITE_FILE;
 
     // this error can happen under low memory conditions, instead of trying to write the whole thing in a single shot
