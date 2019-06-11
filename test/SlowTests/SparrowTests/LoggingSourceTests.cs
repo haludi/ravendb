@@ -254,7 +254,7 @@ namespace SlowTests.SparrowTests
             if (anotherThreadException != null)
                 throw anotherThreadException;
 
-            foreach (var file in beforeRestartFiles.SkipLast(1)) //The last is skipped because it is still written
+            foreach (var file in beforeRestartFiles.OrderBy(f => f).SkipLast(1)) //The last is skipped because it is still written
             {
                 var lastWriteTime = File.GetLastWriteTime(file);
                 Assert.True(
