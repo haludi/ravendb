@@ -134,7 +134,7 @@ namespace Raven.Server.Documents.ETL
                 ThrowInvalidScriptMethodCall($"{Transformation.LoadAttachment}(name) must have a single string argument");
 
             var attachmentName = args[0].AsString();
-            JsValue loadAttachmentReference = (JsValue)Transformation.AttachmentMarker + attachmentName;
+            var loadAttachmentReference = (JsValue)$"{Transformation.AttachmentMarker}{attachmentName}{Guid.NewGuid():N}";
 
             if ((Current.Document.Flags & DocumentFlags.HasAttachments) == DocumentFlags.HasAttachments)
             {

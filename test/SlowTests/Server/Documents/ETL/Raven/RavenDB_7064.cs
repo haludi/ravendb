@@ -135,7 +135,16 @@ person.addAttachment('photo2.jpg-etl', loadAttachment('photo2.jpg'));
                 foreach (var item in items)
                 {
                     var doc = item.LoadUsingStartingWith ? session.Advanced.LoadStartingWith<User>(item.DocId)[0] : session.Load<User>(item.DocId);
-                    Assert.NotNull(doc);
+                    try
+                    {
+                        Assert.NotNull(doc);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine("b");
+                        Console.Read();
+                        throw;
+                    }
 
                     var metadata = session.Advanced.GetMetadataFor(doc);
 

@@ -91,6 +91,7 @@ namespace Raven.Server.Documents.ETL
 
                 _stats.RecordChangeVector(current.ChangeVector);
 
+                //TODO TimeSeries - To check which etag to record on deleted range of time-series
                 _stats.RecordLastFilteredOutEtag(current.Etag, etlItemType);
             }
 

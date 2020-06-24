@@ -2,7 +2,10 @@
   "profiles": {
     "Raven.Server": {
       "commandName": "Project",
-      "commandLineArgs": "--Security.UnsecuredAccessAllowed=\"PublicNetwork\" --Features.Availability=\"Experimental\""
+      "commandLineArgs": "--Security.UnsecuredAccessAllowed=\"PublicNetwork\" --Features.Availability=\"Experimental\"", 
+      "environmentVariables": {
+          "RAVEN_License": "{\"Id\":\"d1377436-7be9-4302-b23b-841265bb9eee\",\"Name\":\"Hibernating Rhinos - Testing\",\"Keys\":[\"BZuAZ44Juv/3XYRCCn+NmONqE\",\"VJ1IKokF9VX9slw59LDpN/kO7\",\"LPKIPb2mRhRf2mwV+jQLub4/A\",\"MMJ3XxWnlY6dQVwx/Taak1jXf\",\"GXRaXcYJtTZYmuwUcRMrkGi71\",\"PmAjAGVryEjjhD1jZSqSx0b7G\",\"5yqhCBBZOSy1JNpgcOiXFABEE\",\"oJSYoSR4qKywtLi8wMScyMzSj\",\"AAQAAKQAAQAAYkFR\"]}"
+      }
     }
   }
 }
