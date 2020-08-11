@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,6 +16,7 @@ using Raven.Client.Util;
 using Raven.Server.Config;
 using Raven.Server.Config.Settings;
 using Raven.Server.Documents.Indexes;
+using Raven.Server.Documents.Replication;
 using Raven.Server.Json;
 using Raven.Server.NotificationCenter.Notifications;
 using Raven.Server.Rachis;
@@ -72,6 +74,7 @@ namespace Raven.Server.ServerWide.Maintenance
             _stabilizationTime = config.StabilizationTime.AsTimeSpan;
             _stabilizationTimeMs = (long)config.StabilizationTime.AsTimeSpan.TotalMilliseconds;
             _moveToRehabTime = (long)config.MoveToRehabGraceTime.AsTimeSpan.TotalMilliseconds;
+            _moveToRehabLagBehindTime = config.MoveToRehabLagBehindTime.AsTimeSpan;
             _rotateGraceTime = (long)config.RotatePreferredNodeGraceTime.AsTimeSpan.TotalMilliseconds;
             _breakdownTimeout = config.AddReplicaTimeout.AsTimeSpan;
             _hardDeleteOnReplacement = config.HardDeleteOnReplacement;
@@ -94,6 +97,7 @@ namespace Raven.Server.ServerWide.Maintenance
         private long _iteration;
         private readonly long _term;
         private readonly long _moveToRehabTime;
+        private readonly TimeSpan _moveToRehabLagBehindTime;
         private readonly long _rotateGraceTime;
         private long _lastIndexCleanupTimeInTicks;
         private long _lastTombstonesCleanupTimeInTicks;
@@ -170,25 +174,25 @@ namespace Raven.Server.ServerWide.Maintenance
             Dictionary<string, ClusterNodeStatusReport> prevStats
             )
         {
-            var currentLeader = _engine.CurrentLeader;
+            Leader currentLeader = _engine.CurrentLeader;
             if (currentLeader == null)
                 return;
 
             using (_contextPool.AllocateOperationContext(out TransactionOperationContext context))
             {
-                var updateCommands = new List<(UpdateTopologyCommand Update, string Reason)>();
+                List<(UpdateTopologyCommand Update, string Reason)> updateCommands = new List<(UpdateTopologyCommand Update, string Reason)>();
                 Dictionary<string, long> cleanUpState = null;
                 List<DeleteDatabaseCommand> deletions = null;
                 using (context.OpenReadTransaction())
                 {
-                    var now = SystemTime.UtcNow;
-                    var cleanupIndexes = now.Ticks - _lastIndexCleanupTimeInTicks >= _server.Configuration.Indexing.CleanupInterval.AsTimeSpan.Ticks;
-                    var cleanupTombstones = now.Ticks - _lastTombstonesCleanupTimeInTicks >= _server.Configuration.Cluster.CompareExchangeTombstonesCleanupInterval.AsTimeSpan.Ticks;
+                    DateTime now = SystemTime.UtcNow;
+                    bool cleanupIndexes = now.Ticks - _lastIndexCleanupTimeInTicks >= _server.Configuration.Indexing.CleanupInterval.AsTimeSpan.Ticks;
+                    bool cleanupTombstones = now.Ticks - _lastTombstonesCleanupTimeInTicks >= _server.Configuration.Cluster.CompareExchangeTombstonesCleanupInterval.AsTimeSpan.Ticks;
 
-                    var clusterTopology = _server.GetClusterTopology(context);
-                    foreach (var database in _engine.StateMachine.GetDatabaseNames(context))
+                    ClusterTopology clusterTopology = _server.GetClusterTopology(context);
+                    foreach (string database in _engine.StateMachine.GetDatabaseNames(context))
                     {
-                        using (var rawRecord = _engine.StateMachine.ReadRawDatabaseRecord(context, database, out long etag))
+                        using (RawDatabaseRecord rawRecord = _engine.StateMachine.ReadRawDatabaseRecord(context, database, out long etag))
                         {
                             if (rawRecord == null)
                             {
@@ -196,23 +200,23 @@ namespace Raven.Server.ServerWide.Maintenance
                                 continue;
                             }
 
-                            var databaseTopology = rawRecord.Topology;
-                            var topologyStamp = databaseTopology?.Stamp ?? new LeaderStamp
+                            DatabaseTopology databaseTopology = rawRecord.Topology;
+                            LeaderStamp topologyStamp = databaseTopology?.Stamp ?? new LeaderStamp
                             {
                                 Index = -1,
                                 LeadersTicks = -1,
                                 Term = -1
                             };
-                            var graceIfLeaderChanged = _term > topologyStamp.Term && currentLeader.LeaderShipDuration < _stabilizationTimeMs;
-                            var letStatsBecomeStable = _term == topologyStamp.Term &&
-                                (currentLeader.LeaderShipDuration - topologyStamp.LeadersTicks < _stabilizationTimeMs);
+                            bool graceIfLeaderChanged = _term > topologyStamp.Term && currentLeader.LeaderShipDuration < _stabilizationTimeMs;
+                            bool letStatsBecomeStable = _term == topologyStamp.Term &&
+                                                        (currentLeader.LeaderShipDuration - topologyStamp.LeadersTicks < _stabilizationTimeMs);
                             if (graceIfLeaderChanged || letStatsBecomeStable)
                             {
                                 LogMessage($"We give more time for the '{database}' stats to become stable, so we skip analyzing it for now.", database: database);
                                 continue;
                             }
 
-                            var state = new DatabaseObservationState
+                            DatabaseObservationState state = new DatabaseObservationState
                             {
                                 Name = database,
                                 DatabaseTopology = databaseTopology,
@@ -226,12 +230,21 @@ namespace Raven.Server.ServerWide.Maintenance
                             if (state.ReadDatabaseDisabled() == true)
                                 continue;
 
-                            var updateReason = UpdateDatabaseTopology(state, ref deletions);
+                            string updateReason;
+                            try
+                            {
+                                updateReason = UpdateDatabaseTopology(state, ref deletions);
+                            }
+                            catch (Exception e)
+                            {
+                                Console.WriteLine(e);
+                                throw;
+                            }
                             if (updateReason != null)
                             {
                                 AddToDecisionLog(database, updateReason);
 
-                                var cmd = new UpdateTopologyCommand(database, RaftIdGenerator.NewId())
+                                UpdateTopologyCommand cmd = new UpdateTopologyCommand(database, RaftIdGenerator.NewId())
                                 {
                                     Topology = databaseTopology,
                                     RaftCommandIndex = etag
@@ -240,7 +253,7 @@ namespace Raven.Server.ServerWide.Maintenance
                                 updateCommands.Add((cmd, updateReason));
                             }
 
-                            var cleanUp = CleanUpDatabaseValues(state);
+                            long? cleanUp = CleanUpDatabaseValues(state);
                             if (cleanUp != null)
                             {
                                 if (cleanUpState == null)
@@ -265,12 +278,12 @@ namespace Raven.Server.ServerWide.Maintenance
                         _lastTombstonesCleanupTimeInTicks = now.Ticks;
                 }
 
-                foreach (var command in updateCommands)
+                foreach ((UpdateTopologyCommand Update, string Reason) command in updateCommands)
                 {
                     try
                     {
                         await UpdateTopology(command.Update);
-                        var alert = AlertRaised.Create(
+                        AlertRaised alert = AlertRaised.Create(
                             command.Update.DatabaseName,
                             $"Topology of database '{command.Update.DatabaseName}' was changed",
                             command.Reason,
@@ -289,7 +302,7 @@ namespace Raven.Server.ServerWide.Maintenance
                 }
                 if (deletions != null)
                 {
-                    foreach (var command in deletions)
+                    foreach (DeleteDatabaseCommand command in deletions)
                     {
                         AddToDecisionLog(command.DatabaseName,
                              $"We reached the replication factor on '{command.DatabaseName}', so we try to remove promotables/rehabs from: {string.Join(", ", command.FromNodes)}");
@@ -300,7 +313,7 @@ namespace Raven.Server.ServerWide.Maintenance
 
                 if (cleanUpState != null)
                 {
-                    var cmd = new CleanUpClusterStateCommand(RaftIdGenerator.NewId())
+                    CleanUpClusterStateCommand cmd = new CleanUpClusterStateCommand(RaftIdGenerator.NewId())
                     {
                         ClusterTransactionsCleanup = cleanUpState
                     };
@@ -558,6 +571,8 @@ namespace Raven.Server.ServerWide.Maintenance
             LogMessage(alertMsg);
         }
 
+        private readonly Dictionary<string, DateTime> _significantLaggingBehindStartTimePerNode = new Dictionary<string, DateTime>();
+        
         private string UpdateDatabaseTopology(DatabaseObservationState state, ref List<DeleteDatabaseCommand> deletions)
         {
             var hasLivingNodes = false;
@@ -572,9 +587,9 @@ namespace Raven.Server.ServerWide.Maintenance
             var someNodesRequireMoreTime = false;
             var rotatePreferredNode = false;
 
+            var nodeAndDbStats = new List<(string member, ClusterNodeStatusReport nodeStats, DatabaseStatusReport dbStats)>();
             foreach (var member in databaseTopology.Members)
             {
-                var status = None;
                 if (current.TryGetValue(member, out var nodeStats) == false)
                 {
                     // there isn't much we can do here, except for log it.
@@ -593,17 +608,25 @@ namespace Raven.Server.ServerWide.Maintenance
                 }
 
                 DatabaseStatusReport dbStats = null;
-                if (nodeStats.Status == ClusterNodeStatusReport.ReportStatus.Ok &&
-                    nodeStats.Report.TryGetValue(dbName, out dbStats))
+                if (nodeStats.Status == ClusterNodeStatusReport.ReportStatus.Ok)
+                    nodeStats.Report.TryGetValue(dbName, out dbStats);
+
+                nodeAndDbStats.Add((member, nodeStats, dbStats));
+            }
+
+            TrackSignificantlyLagBehindNodes(databaseTopology, nodeAndDbStats);
+
+            foreach (var (member, nodeStats, dbStats) in nodeAndDbStats)
+            {
+                if (dbStats != null)
                 {
-                    status = dbStats.Status;
-                    if (status == Loaded ||
-                        status == Unloaded ||
-                        status == NoChange)
+                    if (dbStats.Status == Loaded ||
+                        dbStats.Status == Unloaded ||
+                        dbStats.Status == NoChange)
                     {
                         hasLivingNodes = true;
 
-                        if (databaseTopology.PromotablesStatus.TryGetValue(member, out var _))
+                        if (databaseTopology.PromotablesStatus.TryGetValue(member, out _))
                         {
                             databaseTopology.DemotionReasons.Remove(member);
                             databaseTopology.PromotablesStatus.Remove(member);
@@ -612,7 +635,7 @@ namespace Raven.Server.ServerWide.Maintenance
                         continue;
                     }
                 }
-
+                
                 if (ShouldGiveMoreTimeBeforeMovingToRehab(nodeStats.LastSuccessfulUpdateDateTime, dbStats?.UpTime))
                 {
                     if (ShouldGiveMoreTimeBeforeRotating(nodeStats.LastSuccessfulUpdateDateTime, dbStats?.UpTime) == false)
@@ -631,7 +654,7 @@ namespace Raven.Server.ServerWide.Maintenance
                 }
 
                 if (TryMoveToRehab(dbName, databaseTopology, current, member))
-                    return $"Node {member} is currently not responding (with status: {status}) and moved to rehab";
+                    return $"Node {member} is currently not responding (with status: {dbStats?.Status}) and moved to rehab";
 
                 // database distribution is off and the node is down
                 if (databaseTopology.DynamicNodesDistribution == false && (
@@ -640,10 +663,33 @@ namespace Raven.Server.ServerWide.Maintenance
                 {
                     databaseTopology.DemotionReasons[member] = "Not responding";
                     databaseTopology.PromotablesStatus[member] = DatabasePromotionStatus.NotResponding;
-                    return $"Node {member} is currently not responding with the status '{status}'";
+                    return $"Node {member} is currently not responding with the status '{dbStats.Status}'";
                 }
             }
 
+            if (_significantLaggingBehindStartTimePerNode.Any())
+            {
+                (string member,  DateTime legTime) earliest = (null,  DateTime.MaxValue);
+                foreach (var (cMember, cLegTime) in _significantLaggingBehindStartTimePerNode)
+                {
+                    if (cLegTime < earliest.legTime)
+                        earliest = (cMember, cLegTime);
+                }
+
+                if (DateTime.UtcNow - earliest.legTime > _moveToRehabLagBehindTime)
+                {
+                    var msgBuilder = new StringBuilder($"The database '{dbName}' on {earliest.member} is significantly lagged behind other nodes for more then {_moveToRehabLagBehindTime:g} and therefor moved to rehab." + Environment.NewLine);
+                    foreach (var (member, _, dbStats) in nodeAndDbStats)
+                    {
+                        msgBuilder.AppendLine($"Node {member}, changeVector {dbStats.DatabaseChangeVector}");
+                    }
+
+                    _significantLaggingBehindStartTimePerNode.Remove(earliest.member);
+                    if (TryMoveToRehab(databaseTopology, earliest.member, msgBuilder.ToString(), DatabasePromotionStatus.ChangeVectorNotMerged))
+                        return $"Node {earliest.member} is significantly lagged behind for more then {_moveToRehabLagBehindTime:g} seconds and so moved to rehab";
+                }
+            }
+            
             if (hasLivingNodes && rotatePreferredNode)
             {
                 var member = databaseTopology.Members[0];
@@ -843,6 +889,89 @@ namespace Raven.Server.ServerWide.Maintenance
             return null;
         }
 
+        private struct ChangeVectorSumComparer : IComparer<(string Member, long Sum)>
+        {
+            public int Compare((string Member, long Sum) x, (string Member, long Sum) y) => x.Sum > y.Sum ? 1 : -1;
+        }
+        
+        private void TrackSignificantlyLagBehindNodes(DatabaseTopology databaseTopology, IList<(string member, ClusterNodeStatusReport nodeStats, DatabaseStatusReport dbStats)> nodeAndDbStats)
+        {
+            foreach (var (member, _) in _significantLaggingBehindStartTimePerNode)
+            {
+                if (databaseTopology.Members.Contains(member) == false)
+                    _significantLaggingBehindStartTimePerNode.Remove(member);
+            }
+            
+            var databaseTopologyCount = databaseTopology.Count;
+            //The calculation made against the majority so there must be at least info of majority plus one
+            if (nodeAndDbStats.Count <= databaseTopologyCount / 2 + 1)
+                return;
+            
+            (string member, long sum)[] changeVectorSums = null;
+            try
+            {
+                var changeVectorSumsLength = 0;
+                changeVectorSums = ArrayPool<(string member, long sum)>.Shared.Rent(nodeAndDbStats.Count);
+                for (var i = 0; i < nodeAndDbStats.Count; i++)
+                {
+                    var (member, _, dbStatsI) = nodeAndDbStats[i];
+                    if(dbStatsI == null)
+                        continue;
+                        
+                    for (var j = changeVectorSumsLength + 1; j < nodeAndDbStats.Count; j++)
+                    {
+                        var (_, _, dbStatsJ) = nodeAndDbStats[j];
+                        if(dbStatsJ == null)
+                            continue;
+                            
+                        var conflictStatus = ChangeVectorUtils.GetConflictStatus(dbStatsI.DatabaseChangeVector, dbStatsJ.DatabaseChangeVector);
+                        if (conflictStatus != ConflictStatus.Conflict) 
+                            continue;
+                            
+                        _significantLaggingBehindStartTimePerNode.Clear();
+                        return;
+                    }
+                    long sum = 0;
+                    foreach (var entry in dbStatsI.DatabaseChangeVector.ToChangeVector())
+                    {
+                        sum += entry.Etag;
+                    }
+
+                    changeVectorSums[changeVectorSumsLength] =(member, sum);
+                    changeVectorSumsLength++;
+                }
+
+                //The calculation made against the majority so there must be at least info of majority plus one
+                if (changeVectorSumsLength <= databaseTopologyCount / 2 + 1) 
+                    return;
+                
+                Array.Sort(changeVectorSums, 0, changeVectorSumsLength, new ChangeVectorSumComparer());
+                var majorityStartIndex = (changeVectorSumsLength - 1) / 2;
+                var majorityLowestSum = changeVectorSums[majorityStartIndex].sum;
+                var max = changeVectorSums[changeVectorSumsLength-1].sum;
+                for (var i = 0; i < majorityStartIndex; i++)
+                {
+                    var (member, sum) = changeVectorSums[i];
+                    //To be considered as significant the lag behind from the lowest in the majority needs to be greater than the difference between the lowest in the majority to the max
+                    if (majorityLowestSum - sum > max - majorityLowestSum)
+                    {
+                        if (_significantLaggingBehindStartTimePerNode.ContainsKey(member) == false)
+                            _significantLaggingBehindStartTimePerNode[member] = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        if (_significantLaggingBehindStartTimePerNode.ContainsKey(member))
+                            _significantLaggingBehindStartTimePerNode.Remove(member);
+                    }
+                }
+            }
+            finally
+            {
+                if(changeVectorSums != null)
+                    ArrayPool<(string member, long sum)>.Shared.Return(changeVectorSums);
+            }
+        }
+
         private bool ShouldGiveMoreTimeBeforeMovingToRehab(DateTime lastSuccessfulUpdate, TimeSpan? databaseUpTime)
         {
             var grace = DateTime.UtcNow.AddMilliseconds(-_moveToRehabTime);
@@ -959,14 +1088,7 @@ namespace Raven.Server.ServerWide.Maintenance
                 reason += $". {dbStats.Error}";
             }
 
-            if (topology.Rehabs.Contains(member) == false)
-            {
-                topology.Members.Remove(member);
-                topology.Rehabs.Add(member);
-            }
-
-            topology.DemotionReasons[member] = reason;
-            topology.PromotablesStatus[member] = GetStatus();
+            TryMoveToRehab(topology, member, reason, GetStatus());
 
             LogMessage($"Node {member} of database '{dbName}': {reason}", database: dbName);
 
@@ -987,6 +1109,19 @@ namespace Raven.Server.ServerWide.Maintenance
                 return DatabasePromotionStatus.NotResponding;
             }
 
+            return true;
+        }
+
+        private static bool TryMoveToRehab(DatabaseTopology topology, string member, string reason, DatabasePromotionStatus topologyPromotablesStatu)
+        {
+            if (topology.Rehabs.Contains(member))
+                return false;
+
+            topology.Members.Remove(member);
+            topology.Rehabs.Add(member);
+
+            topology.DemotionReasons[member] = reason;
+            topology.PromotablesStatus[member] = topologyPromotablesStatu;
             return true;
         }
 

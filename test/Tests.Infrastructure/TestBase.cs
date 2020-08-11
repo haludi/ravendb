@@ -268,22 +268,27 @@ namespace FastTests
             return tmp;
         }
 
-        public async Task<DocumentDatabase> GetDatabase(string databaseName)
+        public Task<DocumentDatabase> GetDatabase(string databaseName)
         {
-            var database = await Server.ServerStore.DatabasesLandlord.TryGetOrCreateResourceStore(databaseName).ConfigureAwait(false);
+            return GetDatabase(Server, databaseName);
+        }
+        public static async Task<DocumentDatabase> GetDatabase(RavenServer server, string databaseName)
+        {
+            var database = await server.ServerStore.DatabasesLandlord.TryGetOrCreateResourceStore(databaseName).ConfigureAwait(false);
             if (database == null)
             {
                 // Throw and get more info why database is null
-                using (Server.ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
+                using (server.ServerStore.ContextPool.AllocateOperationContext(out TransactionOperationContext context))
                 {
                     context.OpenReadTransaction();
-                    var lastCommit = Server.ServerStore.Engine.GetLastCommitIndex(context);
-                    var doc = Server.ServerStore.Cluster.Read(context, "db/" + databaseName.ToLowerInvariant());
+                    var lastCommit = server.ServerStore.Engine.GetLastCommitIndex(context);
+                    var doc = server.ServerStore.Cluster.Read(context, "db/" + databaseName.ToLowerInvariant());
                     throw new InvalidOperationException("For " + databaseName + ". Database is null and database record is: " + (doc == null ? "null" : doc.ToString()) + " Last commit: " + lastCommit);
                 }
             }
             return database;
         }
+        
 
         public RavenServer Server
         {
@@ -555,6 +560,8 @@ namespace FastTests
                 configuration.SetSetting(RavenConfiguration.GetKey(x => x.Replication.RetryReplicateAfter), "3");
                 configuration.SetSetting(RavenConfiguration.GetKey(x => x.Replication.RetryMaxTimeout), "3");
                 configuration.SetSetting(RavenConfiguration.GetKey(x => x.Cluster.AddReplicaTimeout), "10");
+                configuration.SetSetting(RavenConfiguration.GetKey(x => x.Security.UnsecuredAccessAllowed), "PrivateNetwork");
+
 
                 if (options.CustomSettings != null)
                 {
@@ -580,7 +587,7 @@ namespace FastTests
                     ThrowOnDuplicateConfiguration(nameof(ServerCreationOptions.RunInMemory));
 
                 if (hasServerUrls == false)
-                    configuration.Core.ServerUrls = new[] { "http://127.0.0.1:0" };
+                    configuration.Core.ServerUrls = new[] { "http://192.168.0.109:8080" };
 
                 if (hasDataDirectory == false)
                 {

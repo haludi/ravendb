@@ -12,9 +12,11 @@ using FastTests.Utils;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Conventions;
 using Raven.Client.Documents.Indexes;
+using Raven.Client.Documents.Operations;
 using Raven.Client.Documents.Operations.Attachments;
 using Raven.Client.Documents.Operations.Revisions;
 using Raven.Client.Documents.Session;
+using Raven.Client.Documents.Smuggler;
 using Raven.Client.ServerWide;
 using Raven.Client.ServerWide.Operations;
 using Raven.Client.ServerWide.Operations.Certificates;
@@ -30,6 +32,8 @@ using Raven.Server.Utils;
 using Tests.Infrastructure;
 using Xunit;
 using Xunit.Abstractions;
+using XunitLogger;
+using IAsyncDisposable = System.IAsyncDisposable;
 
 namespace RachisTests.DatabaseCluster
 {
@@ -51,7 +55,7 @@ namespace RachisTests.DatabaseCluster
             public UsersByName()
             {
                 Map = usersCollection => from user in usersCollection
-                                         select new { user.Name };
+                    select new { user.Name };
                 Index(x => x.Name, FieldIndexing.Search);
             }
         }
@@ -140,6 +144,319 @@ namespace RachisTests.DatabaseCluster
                 await store.Maintenance.Server.SendAsync(new UpdateDatabaseOperation(record, record.Etag));
                 var val = await WaitForValueAsync(async () => await GetMembersCount(store, store.Database), clusterSize);
                 Assert.Equal(3, val);
+            }
+        }
+
+        [Fact]
+        public async Task _______________AAAAAAAAAAAAAAA()
+        {
+            const string electionTimeout = "15000";
+            const string delayedNodeTag = "C";
+
+            // const string operationTimeout = "60000";
+            const int lagBehindTime = 20;
+            var settings = new Dictionary<string, string>()
+            {
+                [RavenConfiguration.GetKey(x => x.Cluster.ElectionTimeout)] = electionTimeout,
+                [RavenConfiguration.GetKey(x => x.Cluster.MoveToRehabLagBehindTime)] = lagBehindTime.ToString(),
+                [RavenConfiguration.GetKey(x => x.Security.UnsecuredAccessAllowed)] = "PrivateNetwork",
+                // [RavenConfiguration.GetKey(x => x.Cluster.StabilizationTime)] = "1",
+                // [RavenConfiguration.GetKey(x => x.Cluster.MoveToRehabGraceTime)] = "10",
+                // [RavenConfiguration.GetKey(x => x.Cluster.RotatePreferredNodeGraceTime)] = "1",
+                // [RavenConfiguration.GetKey(x => x.Replication.ReplicationMinimalHeartbeat)] = "15",
+            };
+            
+            var (_, leader) = await CreateRaftCluster(2, customSettings: settings);
+            Console.WriteLine(leader.WebUrl);
+
+            using var store = GetDocumentStore(new Options {Server = leader, ReplicationFactor = 2});
+
+            // await store.Maintenance.SendAsync(new CreateSampleDataOperation());
+
+            // using var dis = ContinuouslyFillDb(store);
+            // await Task.Delay(TimeSpan.FromSeconds(30));
+            var importOperation = await store
+                .Smuggler
+                .ImportAsync(
+                    new DatabaseSmugglerImportOptions
+                    {
+                        OperateOnTypes = DatabaseSmugglerOptions.DefaultOperateOnTypes & ~DatabaseItemType.RevisionDocuments
+                    },
+                    @"/home/haludi/Documents/DumpForTest.ravendbdump");
+
+            await importOperation.WaitForCompletionAsync();
+            
+            
+            // Console.WriteLine("b");
+            // Console.Read();
+            
+            var settings2 = new Dictionary<string, string>()
+            {
+                [RavenConfiguration.GetKey(x => x.Cluster.ElectionTimeout)] = electionTimeout,
+                [RavenConfiguration.GetKey(x => x.Cluster.MoveToRehabLagBehindTime)] = "30",
+                // [RavenConfiguration.GetKey(x => x.Cluster.OperationTimeout)] = operationTimeout,
+            };
+            var shouldBeRehab = GetNewServer(new ServerCreationOptions {CustomSettings = settings2,});
+
+            shouldBeRehab.ServerStore.Engine.HardResetToPassive();
+            Assert.True(await shouldBeRehab.ServerStore.WaitForState(RachisState.Passive, CancellationToken.None).WaitAsync(20));
+            await ActionWithLeader(l => l.ServerStore.AddNodeToClusterAsync(shouldBeRehab.WebUrl, delayedNodeTag));
+            await store.Maintenance.Server.SendAsync(new AddDatabaseNodeOperation(store.Database, delayedNodeTag));
+            await shouldBeRehab.ServerStore.LicenseManager.ChangeLicenseLimits(delayedNodeTag, 1, Guid.NewGuid().ToString());
+
+            var record = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+
+            record.Topology.Promotables.Remove(delayedNodeTag);
+            record.Topology.Members.Add(delayedNodeTag);
+            await ActionWithLeader(async l => await l.ServerStore.WriteDatabaseRecordAsync(store.Database, record, null, RaftIdGenerator.NewId()));
+
+            Assert.True(await WaitForValueAsync(async () =>
+            {
+                var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                return r.Topology.Members.Contains(delayedNodeTag);
+            }, true, interval: 500));
+            
+            await Task.Delay(TimeSpan.FromSeconds(lagBehindTime));
+            Assert.True(await WaitForValueAsync(async () =>
+            {
+                var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                return r.Topology.Rehabs.Contains(delayedNodeTag);
+            }, true, interval: 500));
+        }
+
+        private class ChangeVectorInfo : IAsyncDisposable
+        {
+            private readonly Context _context;
+            private readonly List<RavenServer> _nodes;
+            private readonly string _db;
+            public StringBuilder MsgBuilder { get; } = new StringBuilder();
+
+            public ChangeVectorInfo(Context context, List<RavenServer> nodes, string db)
+            {
+                _context = context;
+                _nodes = nodes;
+                _db = db;
+            }
+
+            public async ValueTask DisposeAsync()
+            {
+                try
+                {
+                    
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+        }
+
+        private async Task AddChangeVectorInfo(StringBuilder msgBuilder, IEnumerable<RavenServer> nodes, string db)
+        {
+            foreach (var node in nodes)
+            {
+                var documentDatabase = await GetDatabase(node, db);
+                if (documentDatabase == null)
+                {
+                    msgBuilder.AppendLine($"{node.ServerStore.NodeTag} no database, ");
+                }
+                else
+                {
+                    var (_, cv) = documentDatabase.ReadLastEtagAndChangeVector();
+                    msgBuilder.AppendLine($"{node.ServerStore.NodeTag} {cv} {cv.ToChangeVector().Sum(e => e.Etag)}, ");    
+                }
+            }
+        }
+        
+        [Theory]
+        [InlineData(3)]
+        [InlineData(4)]
+        public async Task ClusterObserver_WhenNodeSignificantlyLaggingBehindTheMajorityOfTheCluster_ShouldMovedToRehab(int numberOfNodes)
+        {
+            XunitLogging.EnableExceptionCapture();
+            const string electionTimeout = "15000";
+            var db = GetDatabaseName();
+
+            // const string operationTimeout = "60000";
+            const int lagBehindTime = 10;
+            var settings = new Dictionary<string, string>()
+            {
+                [RavenConfiguration.GetKey(x => x.Cluster.ElectionTimeout)] = electionTimeout,
+                [RavenConfiguration.GetKey(x => x.Cluster.MoveToRehabLagBehindTime)] = lagBehindTime.ToString(),
+                [RavenConfiguration.GetKey(x => x.Cluster.MoveToRehabGraceTime)] = int.MaxValue.ToString(),
+                [RavenConfiguration.GetKey(x => x.Security.UnsecuredAccessAllowed)] = "PrivateNetwork",
+                // [RavenConfiguration.GetKey(x => x.Cluster.StabilizationTime)] = "1",
+                // [RavenConfiguration.GetKey(x => x.Cluster.MoveToRehabGraceTime)] = "10",
+                // [RavenConfiguration.GetKey(x => x.Cluster.RotatePreferredNodeGraceTime)] = "1",
+                // [RavenConfiguration.GetKey(x => x.Replication.ReplicationMinimalHeartbeat)] = "15",
+            };
+
+            var (nodes, leader) = await CreateRaftCluster(numberOfNodes, customSettings: settings);
+            var laggedBehindNode = nodes.First(n => n.ServerStore.NodeTag != n.ServerStore.LeaderTag);
+            var msgBuilder = new StringBuilder();
+
+            using (var store = GetDocumentStore(new Options {Server = leader, DeleteDatabaseOnDispose = false, ModifyDatabaseName = _ => db, ReplicationFactor = numberOfNodes}))
+            {
+                msgBuilder.AppendLine("test II - when one significantly lag behind the majority of the cluster");
+                //---------------------------------------------------------------------------------------------------------
+            
+                await laggedBehindNode.ServerStore.LicenseManager.ChangeLicenseLimits(laggedBehindNode.ServerStore.NodeTag, 1, Guid.NewGuid().ToString());
+                await ActionWithLeader(l => l.ServerStore.RemoveFromClusterAsync(laggedBehindNode.ServerStore.NodeTag));
+                msgBuilder.AppendLine($"{laggedBehindNode.ServerStore.NodeTag} removed from cluster");
+            
+                var importOperation = await store
+                    .Smuggler
+                    .ImportAsync(
+                        new DatabaseSmugglerImportOptions
+                        {
+                            OperateOnTypes = DatabaseSmugglerOptions.DefaultOperateOnTypes & ~DatabaseItemType.RevisionDocuments
+                        },
+                        @"/home/haludi/Documents/DumpForTest.ravendbdump");
+
+                try
+                {
+                    await importOperation.WaitForCompletionAsync();
+                }
+                catch (Exception e)
+                {
+                }
+
+                Console.WriteLine($"{laggedBehindNode.WebUrl}, {laggedBehindNode.ServerStore.NodeTag}");
+                await ActionWithLeader(l => l.ServerStore.AddNodeToClusterAsync(laggedBehindNode.WebUrl, laggedBehindNode.ServerStore.NodeTag));
+            
+                //Be sure new topology was set
+                Assert.True(await WaitForValueAsync(async () =>
+                {
+                    var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    return r.Topology.Members.Contains(laggedBehindNode.ServerStore.NodeTag) == false;
+                }, true, interval: 500));
+            
+                await store.Maintenance.Server.SendAsync(new AddDatabaseNodeOperation(store.Database, laggedBehindNode.ServerStore.NodeTag));
+
+                //Promote lagged behind node to be member
+                var record = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                record.Topology.Promotables.Remove(laggedBehindNode.ServerStore.NodeTag);
+                record.Topology.Members.Add(laggedBehindNode.ServerStore.NodeTag);
+                await ActionWithLeader(async l => await l.ServerStore.WriteDatabaseRecordAsync(store.Database, record, null, RaftIdGenerator.NewId()));
+
+                //Be sure new topology was set
+                Assert.True(await WaitForValueAsync(async () =>
+                {
+                    var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    return r.Topology.Members.Contains(laggedBehindNode.ServerStore.NodeTag);
+                }, true, interval: 500));
+            
+                await Task.Delay(TimeSpan.FromSeconds(lagBehindTime));
+                //Assert lagged behind node moved to rehab
+                var getRehab = await WaitForValueAsync(async () =>
+                {
+                    var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    return r.Topology.Rehabs.Contains(laggedBehindNode.ServerStore.NodeTag);
+                }, true, interval: 500);
+                if (getRehab == false)
+                {
+                    await AddChangeVectorInfo(msgBuilder, nodes, db);
+                    Assert.True(false, msgBuilder.ToString());
+                }
+            }
+            
+            msgBuilder.AppendLine("test II - when majority of the cluster in significant lag");
+            //-----------------------------------------------------------
+            
+            //Let lagged behind node to catch up
+            using (var store = new DocumentStore {Urls = new[] {nodes.First().WebUrl}, Database = db}.Initialize())
+            {
+                await ActionWithLeader(l => l.ServerStore.LicenseManager.ChangeLicenseLimits(laggedBehindNode.ServerStore.NodeTag, null, Guid.NewGuid().ToString()));
+                await WaitForValueAsync(async () =>
+                {
+                    var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    return r.Topology.Members.Contains(laggedBehindNode.ServerStore.NodeTag);
+                }, true, 300 * 1000, 500);
+            }
+            
+            //Remove nodes to make its lagging behind 
+            var laggedBehindNodes = nodes.Where(n => n.ServerStore.NodeTag != n.ServerStore.LeaderTag)
+                .Take((int)Math.Ceiling((double)nodes.Count / 2))
+                .ToArray();
+            foreach (var node in laggedBehindNodes)
+            {
+                await ActionWithLeader(l => l.ServerStore.RemoveFromClusterAsync(node.ServerStore.NodeTag));
+                msgBuilder.AppendLine($"{node.ServerStore.NodeTag} removed from cluster");
+            }
+            await ActionWithLeader(l => l.ServerStore.LicenseManager.ChangeLicenseLimits(l.ServerStore.NodeTag, null, Guid.NewGuid().ToString()));
+
+            var notLaggedBehind = nodes.First(n => laggedBehindNodes.Contains(n) == false);
+            using (var store = new DocumentStore
+            {
+                Urls = new []{notLaggedBehind.WebUrl},
+                Database = db
+            }.Initialize())
+            {
+                var operation = await store
+                    .Operations
+                    .SendAsync(new PatchByQueryOperation(@"
+from Orders as o
+update
+{
+  o.A = 10;
+}"));
+                await operation.WaitForCompletionAsync();
+
+                //Readd nodes 
+                foreach (var node in laggedBehindNodes)
+                {
+                    await ActionWithLeader(l => l.ServerStore.AddNodeToClusterAsync(node.WebUrl, node.ServerStore.NodeTag));
+                    await ActionWithLeader(l => l.ServerStore.LicenseManager.ChangeLicenseLimits(node.ServerStore.NodeTag, 1, Guid.NewGuid().ToString()));
+                }
+            
+                //Be sure new topology was set
+                Assert.True(await WaitForValueAsync(async () =>
+                {
+                    var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    return laggedBehindNodes.All(n => r.Topology.Members.Contains(n.ServerStore.NodeTag) == false);
+                }, true, interval: 500));
+            
+                //Promote lagged behind nodes to be members
+                var record = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                foreach (var node in laggedBehindNodes)
+                {
+                    record.Topology.Promotables.Remove(node.ServerStore.NodeTag);
+                    record.Topology.Members.Add(node.ServerStore.NodeTag);
+                }
+                await ActionWithLeader(async l => await l.ServerStore.WriteDatabaseRecordAsync(store.Database, record, null, RaftIdGenerator.NewId()));
+                
+                //Be sure all are members
+                Assert.True(await WaitForValueAsync(async () =>
+                {
+                    var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    return laggedBehindNodes.All(n => r.Topology.Members.Contains(n.ServerStore.NodeTag));
+                }, true, interval: 500));
+            
+                await Task.Delay(TimeSpan.FromSeconds(lagBehindTime));
+                //Assert nodes where not moved to rehab
+                var stop = Stopwatch.StartNew();
+                while (stop.Elapsed < TimeSpan.FromSeconds(15))
+                {
+                    var r = await store.Maintenance.Server.SendAsync(new GetDatabaseRecordOperation(store.Database));
+                    var anyGetRehab = laggedBehindNodes.Any(n => r.Topology.Rehabs.Contains(n.ServerStore.NodeTag));
+                    if (anyGetRehab)
+                    {
+                        await AddChangeVectorInfo(msgBuilder, nodes, db);
+                        Assert.True(false, msgBuilder.ToString());
+                    }
+                    
+                    var (_, notLaggedBehindCv) = GetDatabase(notLaggedBehind, db).GetAwaiter().GetResult().ReadLastEtagAndChangeVector();
+                    var anyCatchUp = laggedBehindNodes.Any(n =>
+                    {
+                        var (_, cv) = GetDatabase(n, db).GetAwaiter().GetResult().ReadLastEtagAndChangeVector();
+                        return notLaggedBehindCv == cv;
+                    });
+                    if (anyCatchUp)
+                    {
+                        await AddChangeVectorInfo(msgBuilder, nodes, db);
+                        Assert.True(false, msgBuilder.ToString());
+                    }
+                }
             }
         }
 
