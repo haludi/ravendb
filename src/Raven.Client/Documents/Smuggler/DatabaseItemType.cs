@@ -51,6 +51,7 @@ namespace Raven.Client.Documents.Smuggler
         SinkPullReplications = 1 << 13,
         HubPullReplications = 1 << 14,
         TimeSeries = 1 << 15,
-        DocumentsCompression = 1 << 16
+        DocumentsCompression = 1 << 16,
+        UnusedDatabaseIds = 1 << 17,
     }
 }

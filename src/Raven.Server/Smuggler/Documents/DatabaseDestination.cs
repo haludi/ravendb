@@ -860,7 +860,7 @@ namespace Raven.Server.Smuggler.Documents
                     progress.ClientConfigurationUpdated = true;
                 }
 
-                if (databaseRecord.UnusedDatabaseIds != null && databaseRecord.UnusedDatabaseIds.Count > 0)
+                if (databaseRecord.UnusedDatabaseIds != null && databaseRecord.UnusedDatabaseIds.Count > 0 && databaseRecordItemType.HasFlag(DatabaseRecordItemType.UnusedDatabaseIds))
                 {
                     if (_log.IsInfoEnabled)
                         _log.Info("Set unused database Ids from smuggler");
