@@ -1363,7 +1363,7 @@ namespace Raven.Server.Documents.Replication
                         {
                             DbId = entry.DbId,
                             Etag = entry.Etag,
-                            NodeTag = ChangeVectorExtensions.SinkTag
+                            NodeTag = ChangeVectorParser.SinkInt
                         });
 
                         context.DbIdsToIgnore ??= new HashSet<string>();
@@ -1389,7 +1389,7 @@ namespace Raven.Server.Documents.Replication
 
                 foreach (var entry in incoming)
                 {
-                    if (entry.NodeTag == ChangeVectorExtensions.SinkTag)
+                    if (entry.NodeTag == ChangeVectorParser.SinkInt)
                     {
                         var found = global?.Find(x => x.DbId == entry.DbId) ?? default;
                         if (found.Etag > 0)
