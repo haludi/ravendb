@@ -42,6 +42,7 @@ namespace Sparrow.Server.Platform
             FailGetRealPath = 32,
             FailGetModuleHandle = 33,
             FailDiscardVirtualMemory = 34,
+            FailUnknownStatFileFormat = 35,
         };
 
         [Flags]

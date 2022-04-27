@@ -35,5 +35,12 @@ namespace Sparrow.Server.Platform
             public void* VirtualAddress;
             public IntPtr NumberOfBytes;
         }
+        
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        public struct IoStats
+        {
+            public UInt64 Read;
+            public UInt64 Write;
+        }
     }
 }

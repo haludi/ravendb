@@ -251,6 +251,26 @@ namespace Sparrow.Server.Platform
             out UInt64 totalSizeInBytes,
             out Int32 errorCode
         );
+        
+        public static PalFlags.FailCodes rvn_get_path_disk_stats(
+            string filename,
+            out PalDefinitions.IoStats ioStats,
+            out Int32 errorCode)
+        {
+            using (var convert = new Converter(filename))
+            {
+                return rvn_get_path_disk_stats(convert.Pointer,
+                    out ioStats,
+                    out errorCode);
+            }
+        }
+
+        [DllImport(LIBRVNPAL, SetLastError = true)]
+        private static extern PalFlags.FailCodes rvn_get_path_disk_stats(
+            byte* path,
+            out PalDefinitions.IoStats ioStats,
+            out Int32 errorCode
+        );
 
         public static PalFlags.FailCodes rvn_open_journal_for_reads(
             string filename,
