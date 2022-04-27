@@ -37,6 +37,13 @@ EXPORT struct RVN_RANGE_LIST
     size_t number_of_bytes;
 } RVN_RANGE_LIST;
 
+EXPORT struct IO_STATS {
+	/* # of read operations issued to the device */
+	uint64_t read;
+	/* # of write operations issued to the device */
+	uint64_t write;
+} IO_STATS;
+
 EXPORT uint64_t
 rvn_get_current_thread_id(void);
 
@@ -99,6 +106,9 @@ rvn_test_storage_durability(const char *temp_file_name, int32_t *detailed_error_
 
 EXPORT int32_t
 rvn_get_path_disk_space(const char * path, uint64_t* total_free_bytes, uint64_t* total_size_bytes, int32_t* detailed_error_code);
+
+EXPORT int32_t
+rvn_get_path_disk_stats(const char * path, struct IO_STATS* io_stats, int32_t* detailed_error_code);
 
 /* For internal use: */
 PRIVATE int64_t

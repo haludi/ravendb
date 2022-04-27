@@ -41,6 +41,7 @@
 #define FAIL_GET_REAL_PATH              32
 #define FAIL_GET_MODULE_HANDLE          33
 #define FAIL_DISCARD_VIRTUAL_MEMORY     34
+#define FAIL_UNKNOWN_STAT_FILE_FORMAT   35
 
 #define ERRNO_SPECIAL_CODES_NONE        0
 #define ERRNO_SPECIAL_CODES_ENOMEM      (1 << 0)

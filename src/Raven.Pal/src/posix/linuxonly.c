@@ -17,6 +17,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #include "rvn.h"
 #include "status_codes.h"
@@ -108,5 +109,39 @@ error_cleanup:
     return rc;
 }
 
+PRIVATE int32_t 
+_read_sysfs_file_stat(char *filename, struct IO_STATS *ios)
+{
+	FILE *fp;
+	int i;
+	unsigned long rd_ios, wr_ios, rd_sec_or_wr_ios;
+
+	/* Try to read given stat file */
+	if ((fp = fopen(filename, "r")) == NULL)
+		return -1;
+
+	i = fscanf(fp, "%lu %*u %lu %*u %lu",
+		   &rd_ios, &rd_sec_or_wr_ios, &wr_ios);
+
+	memset(ios, 0, sizeof(struct IO_STATS));
+
+	ios->read = rd_ios;
+	if (i > 2) {
+		/* Device or partition */
+		ios->write = wr_ios;
+	}
+	else if (i == 2) {
+		/* Partition without extended statistics */
+		ios->write = rd_sec_or_wr_ios;
+	}
+  else
+  {
+    return -1;
+  }
+
+	fclose(fp);
+
+	return 0;
+}
 
 #endif
