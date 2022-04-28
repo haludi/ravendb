@@ -67,6 +67,7 @@ rvn_get_path_disk_space(const char* path, uint64_t* total_free_bytes, uint64_t* 
 EXPORT int32_t
 rvn_get_path_disk_stats(const char * path, struct IO_STATS* io_stats, int32_t* detailed_error_code)
 {
+    /* https://github.com/sysstat/sysstat/blob/master/iostat.c#L699 */
     struct stat stats;
 	*detailed_error_code = 0;
     int minorValue, majorValue;

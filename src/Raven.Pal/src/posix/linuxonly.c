@@ -120,6 +120,10 @@ _read_sysfs_file_stat(char *filename, struct IO_STATS *ios)
 	if ((fp = fopen(filename, "r")) == NULL)
 		return -1;
 
+    /*
+     *https://www.kernel.org/doc/Documentation/block/stat.txt
+     *https://github.com/sysstat/sysstat/blob/master/iostat.c#L429
+     */
 	i = fscanf(fp, "%lu %*u %lu %*u %lu",
 		   &rd_ios, &rd_sec_or_wr_ios, &wr_ios);
 
