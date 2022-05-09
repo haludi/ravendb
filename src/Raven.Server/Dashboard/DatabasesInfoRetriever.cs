@@ -419,8 +419,8 @@ namespace Raven.Server.Dashboard
                 {
                     mountPointUsage.IoStatsResult = new IoStatsResult
                     {
-                        ReadIOs = diskStatsResult.ReadIos,
-                        WriteIOs = diskStatsResult.WriteIos
+                        IoReadOperations = diskStatsResult.IoReadOperations,
+                        IoWriteOperations = diskStatsResult.IoWriteOperations
                     };
                 }
                 
