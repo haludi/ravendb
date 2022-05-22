@@ -4,6 +4,10 @@ namespace Raven.Server.Rachis
 {
     public class AppendEntries 
     {
+        public AppendEntries()
+        {
+            
+        }
         public long Term { get; set; }
         public long PrevLogIndex { get; set; }
         public long PrevLogTerm { get; set; }

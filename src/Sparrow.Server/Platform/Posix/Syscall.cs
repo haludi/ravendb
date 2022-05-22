@@ -15,6 +15,34 @@ namespace Sparrow.Server.Platform.Posix
 
         [DllImport(LIBC_6, EntryPoint = "syscall", SetLastError = true)]
         public static extern long syscall0(long number);
+        
+//         struct stat {
+//             public UInt64     st_dev;         /* ID of device containing file */
+//             public UInt64     st_ino;         /* Inode number */
+//             public UInt32    st_mode;        /* File type and mode */
+//             nlink_t   st_nlink;       /* Number of hard links */
+//             uid_t     st_uid;         /* User ID of owner */
+//             gid_t     st_gid;         /* Group ID of owner */
+//             dev_t     st_rdev;        /* Device ID (if special file) */
+//             off_t     st_size;        /* Total size, in bytes */
+//             blksize_t st_blksize;     /* Block size for filesystem I/O */
+//             blkcnt_t  st_blocks;      /* Number of 512B blocks allocated */
+//
+//             /* Since Linux 2.6, the kernel supports nanosecond
+//                precision for the following timestamp fields.
+//                For the details before Linux 2.6, see NOTES. */
+//
+//             struct timespec st_atim;  /* Time of last access */
+//             struct timespec st_mtim;  /* Time of last modification */
+//             struct timespec st_ctim;  /* Time of last status change */
+//
+// #define st_atime st_atim.tv_sec      /* Backward compatibility */
+// #define st_mtime st_mtim.tv_sec
+// #define st_ctime st_ctim.tv_sec
+//         };;
+        
+        [DllImport(LIBC_6, EntryPoint = "syscall", SetLastError = true)]
+        public static extern long syscall3(long number);
 
         [DllImport(LIBC_6, SetLastError = true)]
         public static extern int sched_setaffinity(int pid, IntPtr cpusetsize, ref ulong cpuset);
@@ -211,6 +239,9 @@ namespace Sparrow.Server.Platform.Posix
         [DllImport(LIBC_6, SetLastError = true)]
         public static extern int prctl(int option, UIntPtr arg2, UIntPtr arg3, UIntPtr arg4, UIntPtr arg5);
         public const int PR_SET_PTRACER = 0x59616d61;
+
+        [DllImport(LIBC_6, SetLastError = true)]
+        public static extern int statx(int fd, string filename, Int32 flags, UInt32 mask, out Statx buf);
 
         public static void PwriteOrThrow(int fd, byte* buffer, ulong count, long offset, string file, string debug)
         {

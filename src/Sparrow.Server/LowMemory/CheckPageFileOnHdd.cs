@@ -487,5 +487,11 @@ namespace Sparrow.Server.LowMemory
                 return null;
             }
         }
+        
+        [DllImport("kernel32.dll", SetLastError=true)]
+        public static extern IntPtr LoadLibrary(string lpFileName);
+
+        [DllImport("kernel32.dll", CharSet=CharSet.Ansi, ExactSpelling=true, SetLastError=true)]
+        public static extern UIntPtr GetProcAddress(IntPtr hModule, string procName);
     }
 }
