@@ -100,6 +100,10 @@ rvn_test_storage_durability(const char *temp_file_name, int32_t *detailed_error_
 EXPORT int32_t
 rvn_get_path_disk_space(const char * path, uint64_t* total_free_bytes, uint64_t* total_size_bytes, int32_t* detailed_error_code);
 
+/* For Linux only */
+EXPORT int32_t
+rvn_get_disk_major_minor(const char *path, int32_t *majorValue, int32_t *minorValue, int32_t *detailed_error_code);
+
 /* For internal use: */
 PRIVATE int64_t
 _nearest_size_to_page_size(int64_t orig_size, int64_t sys_page_size);

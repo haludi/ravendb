@@ -293,6 +293,23 @@ namespace Sparrow.Server.Platform
         public static extern PalFlags.FailCodes rvn_test_storage_durability(
             byte* tempFilename,
             out Int32 errorCode);
+        
+        public static PalFlags.FailCodes rvn_get_disk_major_minor(
+            string path,
+            out int major,
+            out int minor,
+            out Int32 errorCode)
+        {
+            using var convert = new Converter(path);
+            return rvn_get_disk_major_minor(convert.Pointer, out major, out minor, out errorCode);
+        }
+
+        [DllImport(LIBRVNPAL, SetLastError = true)]
+        public static extern PalFlags.FailCodes rvn_get_disk_major_minor(
+            byte* path,
+            out int major,
+            out int minor,
+            out Int32 errorCode);
 
         [DllImport(LIBRVNPAL, SetLastError = true)]
         public static extern Int32 rvn_get_pal_ver();

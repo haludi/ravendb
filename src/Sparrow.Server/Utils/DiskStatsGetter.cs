@@ -1,11 +1,10 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Sparrow.Logging;
-using Sparrow.Server.Platform.Posix;
+using Sparrow.Server.Platform;
 
 namespace Sparrow.Server.Utils
 {
@@ -112,15 +111,15 @@ namespace Sparrow.Server.Utils
         {
             try
             {
-                // https://github.com/whotwagner/statx-fun/blob/master/statx.h
-                if (Syscall.statx(0, path, 0, 0x00000fffU, out var buf) != 0)
+                var result = Pal.rvn_get_disk_major_minor(path, out var major, out var minor, out var error);
+                if (result != PalFlags.FailCodes.Success)
                 {
                     if(Logger.IsInfoEnabled)
-                        Logger.Info($"Could not get statx of {path} - {Marshal.GetLastWin32Error()}");
+                        Logger.Info(PalHelper.GetNativeErrorString(error, $"Failed to get disk stat for path: {path}. FailCode={result}", out _));
                     return null;
                 }
 
-                var statPath = $"/sys/dev/block/{buf.stx_dev_major}:{buf.stx_dev_minor}/stat";
+                var statPath = $"/sys/dev/block/{major}:{minor}/stat";
                 using var reader = File.OpenRead(statPath);
             
                 return ReadParse(reader);

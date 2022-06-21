@@ -17,6 +17,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <unistd.h>
+#include <sys/sysmacros.h>
 
 #include "rvn.h"
 #include "status_codes.h"
@@ -106,6 +107,29 @@ error_cleanup:
     }
 
     return rc;
+}
+
+EXPORT int32_t
+rvn_get_disk_major_minor(const char *path, int32_t *majorValue, int32_t *minorValue, int32_t *detailed_error_code)
+{
+    struct stat stats;
+    if (stat(path, &stats) == 0)
+    {
+        int deviceId;
+        
+        deviceId = S_ISBLK(stats.st_mode) == 0
+          ? stats.st_dev
+          : stats.st_rdev;
+
+        *minorValue = minor(deviceId);
+        *majorValue = major(deviceId);
+        return SUCCESS;
+    }
+    else
+    {
+        *detailed_error_code = errno;
+        return FAIL_STAT_FILE;
+    }
 }
 
 
