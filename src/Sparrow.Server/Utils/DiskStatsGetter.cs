@@ -2,9 +2,11 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using Sparrow.Logging;
 using Sparrow.Server.Platform;
+using Mono.Unix.Native;
 
 namespace Sparrow.Server.Utils
 {
@@ -111,13 +113,7 @@ namespace Sparrow.Server.Utils
         {
             try
             {
-                var result = Pal.rvn_get_disk_major_minor(path, out var major, out var minor, out var error);
-                if (result != PalFlags.FailCodes.Success)
-                {
-                    if(Logger.IsInfoEnabled)
-                        Logger.Info(PalHelper.GetNativeErrorString(error, $"Failed to get disk stat for path: {path}. FailCode={result}", out _));
-                    return null;
-                }
+                var (major, minor) = GetDiskMajorMinor(path);
 
                 var statPath = $"/sys/dev/block/{major}:{minor}/stat";
                 using var reader = File.OpenRead(statPath);
@@ -130,6 +126,29 @@ namespace Sparrow.Server.Utils
                     Logger.Info($"Could not get GetDiskInfo of {path}", e);
                 return null;
             }
+        }
+
+        private (ulong Major, ulong Minor) GetDiskMajorMinor(string path)
+        {
+            if (Syscall.stat(path, out var stats) != 0)
+            {
+                var errno = Stdlib.GetLastError();
+                var errorBuilder = new StringBuilder();
+                Syscall.strerror_r(errno, errorBuilder,1024);
+                errorBuilder.Insert(0, $"Failed to get stat for \"{path}\" : ");
+                throw new InvalidOperationException(errorBuilder.ToString());
+            }
+            
+            var deviceId = (stats.st_mode & FilePermissions.S_IFBLK) == FilePermissions.S_IFBLK
+                ? stats.st_rdev
+                : stats.st_dev;
+                
+            var major = (deviceId & 0x00000000000fff00u) >> 8;
+            major |= (deviceId & 0xfffff00000000000u) >> 32;
+                
+            var minor = (deviceId & 0x00000000000000ffu);
+            minor |= (deviceId & 0x00000ffffff00000u) >> 12;
+            return (major, minor);
         }
 
         private static DiskStatsRawResult ReadParse(FileStream buffer)
