@@ -151,7 +151,7 @@ namespace Sparrow.Server.Utils
             return (major, minor);
         }
 
-        private static DiskStatsRawResult ReadParse(FileStream buffer)
+        private static DiskStatsRawResult ReadParse(FileStream stream)
         {
             const int maxLongLength = 19;
             const int maxValuesLength = 17;
@@ -162,18 +162,27 @@ namespace Sparrow.Server.Utils
             var time = DateTime.UtcNow;
             
             int valuesIndex = 0;
-            while (buffer.Position < buffer.Length && valuesIndex < maxValuesLength)
+            while (stream.Position < stream.Length && valuesIndex < maxValuesLength)
             {
-                var ch = (char)buffer.ReadByte();
+                int readByte = stream.ReadByte();
+                if(readByte == -1)
+                    //end of file
+                    break;
+                
+                var ch = (char)readByte;
                 if (char.IsWhiteSpace(ch))
                     continue;
 
                 var index = 0;
-                while (buffer.Position < buffer.Length)
+                while (stream.Position < stream.Length)
                 {
                     serializedValue[index++] = ch;
-                    ch = (char)buffer.ReadByte();
-
+                    readByte = stream.ReadByte();
+                    if(readByte == -1)
+                        //end of file
+                        break;
+                    
+                    ch = (char)readByte;
                     if (char.IsWhiteSpace(ch))
                         break;
                 }
@@ -208,7 +217,7 @@ namespace Sparrow.Server.Utils
             else
             {
                 if(Logger.IsInfoEnabled)
-                    Logger.Info($"The stats file {buffer.Name} should contain at least 4 values");
+                    Logger.Info($"The stats file {stream.Name} should contain at least 4 values");
                 return null;
             }
 
