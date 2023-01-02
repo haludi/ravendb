@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Raven.Server.Config.Categories;
 using Sparrow;
+using Sparrow.Json;
 using Sparrow.Logging;
 
 namespace Raven.Server.Utils.MicrosoftLogging;
@@ -12,7 +13,7 @@ namespace Raven.Server.Utils.MicrosoftLogging;
 public static class WebHostBuilderExtensions
 {
     public static IWebHostBuilder ConfigureMicrosoftLogging(this IWebHostBuilder hostBuilder, ref MicrosoftLoggingProvider sparrowLoggingProvider, LogsConfiguration configuration,
-        NotificationCenter.NotificationCenter notificationCenter)
+        NotificationCenter.NotificationCenter notification)
     {
         if (configuration.DisableMicrosoftLogs)
             return hostBuilder;
@@ -28,8 +29,11 @@ public static class WebHostBuilderExtensions
         internalLoggingSource.MaxFileSizeInBytes = maxFileSize.GetValue(SizeUnit.Bytes);
         internalLoggingSource.SetupLogMode(LogMode.Information, logPath, retentionTime?.AsTimeSpan, retentionSize?.GetValue(SizeUnit.Bytes), compress);
         
-        sparrowLoggingProvider =  new MicrosoftLoggingProvider(internalLoggingSource, notificationCenter);
-        sparrowLoggingProvider.Init(configuration);
+        sparrowLoggingProvider =  new MicrosoftLoggingProvider(internalLoggingSource, notification);
+        using (var context = JsonOperationContext.ShortTermSingleUse())
+        {
+            sparrowLoggingProvider.InitAsync(configuration, context).GetAwaiter().GetResult();
+        }
         var internalSparrowLoggingProvider = sparrowLoggingProvider;
         return hostBuilder.ConfigureLogging(logging =>
         {

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -8,6 +11,7 @@ using Raven.Server.Config.Categories;
 using Raven.Server.NotificationCenter.Notifications;
 using Raven.Server.NotificationCenter.Notifications.Details;
 using Sparrow;
+using Sparrow.Json;
 using Sparrow.Logging;
 
 namespace Raven.Server.Utils.MicrosoftLogging;
@@ -47,30 +51,59 @@ public class MicrosoftLoggingProvider : ILoggerProvider
     {
     }
 
-    public void Init(LogsConfiguration configuration)
+    public async Task InitAsync(LogsConfiguration configuration, JsonOperationContext context)
     {
-        var configurationStr = File.ReadAllText(configuration.MicrosoftLogsConfigurationPath.FullPath);
-        SetConfiguration(configurationStr);
+        Stream fileStream;
+        var fullPath = configuration.MicrosoftLogsConfigurationPath.FullPath;
+        try
+        {
+            fileStream = File.OpenRead(fullPath);
+        }
+        catch (Exception e)
+        {
+            if (e is not FileNotFoundException)
+            {
+                var msg = $"Failed to open microsoft configuration file. FilePath:\"{fullPath}\"";
+                _notificationCenter.InitializeTask.ContinueWith(task => task.Result.Dismiss(_notificationId))
+                if(Logger.IsInfoEnabled)
+                    Logger.Info(msg, e);
+            }
+            return;
+        }
+        await using (var configurationFile = fileStream)
+        {
+            await ReadAndApplyConfiguration(configurationFile, context);
+        }
     }
 
     private const string NotificationKey = "microsoft-configuration-logs-error";
     private const AlertType AlertType = NotificationCenter.Notifications.AlertType.MicrosoftLogsConfigurationLoadError;
     private readonly string _notificationId = AlertRaised.GetKey(AlertType, NotificationKey);
-    public void SetConfiguration(string strConfiguration, bool reset = true)
+
+    public IEnumerable<(string name, LogLevel minLogLevel)> GetLoggers()
+    {
+        return _loggers.Select(x => (x.Key, x.Value.MinLogLevel));
+    }
+    public IEnumerable<(string category, LogLevel logLevel)> GetConfiguration()
+    {
+        return _configuration.Select(x => (x.Key.ToString(), x.Value));
+    }
+    public async Task ReadAndApplyConfiguration(Stream streamConfiguration, JsonOperationContext context, bool reset = true)
     {
         try
         {
             if(reset)
                 _configuration.Clear();
 
-            ReadConfiguration(strConfiguration);
+            await ReadConfiguration(streamConfiguration, context);
             ApplyConfiguration();
             
-            _notificationCenter.InitializeTask.ContinueWith(task => task.Result.Dismiss(_notificationId));
+            //If the code run on server startup the notification center is not initialized 
+            _ = _notificationCenter.InitializeTask.ContinueWith(task => task.Result.Dismiss(_notificationId));
         }
         catch (Exception e)
         {
-            var msg = $"Failed to init Microsoft log configuration. configuration content : {strConfiguration}";
+            var msg = $"Failed to init Microsoft log configuration. configuration content : {streamConfiguration}";
             var alert = AlertRaised.Create(
                 null,
                 "Microsoft Logs Configuration Load Failed",
@@ -80,42 +113,37 @@ public class MicrosoftLoggingProvider : ILoggerProvider
                 key: NotificationKey,
                 details: new ExceptionDetails(e));
             
-            _notificationCenter.InitializeTask.ContinueWith(task => task.Result.Add(alert));
+            //If the code run on server startup the notification center is not initialized 
+            _ = _notificationCenter.InitializeTask.ContinueWith(task => task.Result.Add(alert));
                 
             if (Logger.IsInfoEnabled) 
                 Logger.Info(msg, e);
         }
     }
-
-    private void ReadConfiguration(string configurationStr)
+    private async Task ReadConfiguration(Stream configurationStr, JsonOperationContext context)
     {
-        var microsoftLogsConfiguration = JsonConvert.DeserializeObject<JObject>(configurationStr);
-        ReadConfiguration(microsoftLogsConfiguration);
+        var blitConfiguration = await context.ReadForMemoryAsync(configurationStr, "logs/configuration");
+        ReadConfiguration(blitConfiguration, null);
     }
-    private void ReadConfiguration(JObject jConfiguration)
+    private void ReadConfiguration(BlittableJsonReaderObject jConfiguration, string path)
     {
-        foreach (var (key, value) in jConfiguration.Value<JObject>())
+        jConfiguration.BlittableValidation();
+        foreach (var category in jConfiguration.GetPropertyNames())
         {
-            if (value == null)
-                continue;
-
-            switch (value)
+            if (jConfiguration.TryGetWithoutThrowingOnError(category, out LogLevel logLevel))
             {
-                case JObject jObjectValue:
-                    ReadConfiguration(jObjectValue);
-                    break;
-                case JValue jLogLevel:
-                    if(jLogLevel.Type != JTokenType.String || Enum.TryParse(jLogLevel.Value<string>(), out LogLevel logLevel) == false)
-                        goto default;
-                    if (_configuration.TryAdd(jConfiguration.Path, logLevel) == false)
-                        throw new InvalidOperationException($"Duplicate category - {jConfiguration.Path}");
-                    break;
-                default:
-                    throw new InvalidOperationException($"Invalid value in microsoft configuration. Path {value.Path}, Value {value}");
+                _configuration[path + category] = logLevel;
+            }
+            else if(jConfiguration.TryGetWithoutThrowingOnError(category, out BlittableJsonReaderObject jObjectValue))
+            {
+                ReadConfiguration(jObjectValue, path + category + '.');
+            }
+            else
+            {
+                throw new InvalidOperationException($"Invalid value in microsoft configuration. Path {category}, Value {jConfiguration[category]}");
             }
         }
     }
-
     void ApplyConfiguration()
     {
         foreach (var (categoryName, logger) in _loggers)
@@ -123,7 +151,6 @@ public class MicrosoftLoggingProvider : ILoggerProvider
             logger.MinLogLevel = GetLogLevelForCategory(categoryName);
         }
     }
-
     private LogLevel GetLogLevelForCategory(string categoryName)
     {
         LogLevel logLevel;
