@@ -55,6 +55,7 @@ namespace Raven.Server.Web.System
                 context.OpenReadTransaction();
                 await using (var writer = new AsyncBlittableJsonTextWriter(context, ResponseBodyStream()))
                 {
+                    
                     writer.WriteStartObject();
 
                     var items = ServerStore.Cluster.ItemsStartingWith(context, Constants.Documents.Prefix, GetStart(), GetPageSize());
