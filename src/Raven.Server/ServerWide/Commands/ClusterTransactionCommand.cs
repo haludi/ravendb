@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Raven.Client;
 using Raven.Client.Documents.Commands.Batches;
 using Raven.Client.ServerWide;
@@ -16,6 +18,7 @@ using Sparrow.Binary;
 using Sparrow.Extensions;
 using Sparrow.Json;
 using Sparrow.Json.Parsing;
+using Sparrow.Logging;
 using Sparrow.Server;
 using Voron;
 using Voron.Data.Tables;
@@ -25,6 +28,29 @@ namespace Raven.Server.ServerWide.Commands
 {
     public class ClusterTransactionCommand : CommandBase
     {
+        public static bool A = false;
+        
+        public static Logger Logger;
+        // public static StreamWriter OutputFile;
+        public DateTime Start;
+        TimeSpan fromMilliseconds = TimeSpan.FromMilliseconds(5000);
+
+        public void WriteTime(string message, string tag)
+        {
+            var diff = DateTime.Now - Start;
+
+            var isIt = OriginTag == tag && diff > fromMilliseconds;
+            string buffer = $"{tag} {diff} {UniqueRequestId} {message} {(isIt?"HaludiSlow":"")}";
+
+            Logger?.Operations(buffer);
+            
+            if(isIt)
+            {
+                Console.WriteLine(buffer);
+                A = true;
+            }
+        }
+        
         public string DatabaseName;
 
         public string DatabaseRecordId;
@@ -423,6 +449,7 @@ namespace Raven.Server.ServerWide.Commands
         }
 
         public bool HasDocumentsInTransaction => SerializedDatabaseCommands != null && DatabaseCommandsCount != 0;
+        public string OriginTag { get; set; }
 
         public enum TransactionCommandsColumn
         {
@@ -675,6 +702,8 @@ namespace Raven.Server.ServerWide.Commands
             djv[nameof(DatabaseCommandsCount)] = DatabaseCommandsCount;
             djv[nameof(FromBackup)] = FromBackup;
             djv[nameof(CommandCreationTicks)] = CommandCreationTicks;
+            djv[nameof(Start)] = Start;
+            djv[nameof(OriginTag)] = OriginTag;
 
             return djv;
         }

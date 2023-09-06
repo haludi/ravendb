@@ -260,7 +260,7 @@ namespace Raven.Server.Rachis
                             _engine.ForTestingPurposes?.BeforeCastingForRealElection();
 
                             HandleVoteResult result;
-                            using (context.OpenWriteTransaction())
+                            using (context.OpenWriteTransaction(debug: "HandleVoteRequest"))
                             {
                                 result = ShouldGrantVote(context, lastLogIndex, rv);
                                 if (result.DeclineVote == false)

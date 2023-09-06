@@ -17,6 +17,7 @@ using Raven.Server.ServerWide.Commands;
 using Raven.Server.ServerWide.Context;
 using Raven.Server.Utils;
 using Sparrow.Json;
+using Sparrow.Logging;
 using Sparrow.Server;
 using Sparrow.Server.Utils;
 using Sparrow.Threading;
@@ -358,7 +359,7 @@ namespace Raven.Server.Rachis
                         if (lowestIndexInEntireCluster > lastTruncated)
                         {
                             using (_engine.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-                            using (context.OpenWriteTransaction())
+                            using (context.OpenWriteTransaction(debug: "Run"))
                             {
                                 _engine.TruncateLogBefore(context, lowestIndexInEntireCluster);
                                 LowestIndexInEntireCluster = lowestIndexInEntireCluster;
@@ -494,9 +495,11 @@ namespace Raven.Server.Rachis
                 return; // nothing to do here
 
             bool changedFromLeaderElectToLeader;
+            _logger.Operations("Apply Before OpenWriteTransaction");
             using (_engine.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-            using (var tx = context.OpenWriteTransaction())
+            using (var tx = context.OpenWriteTransaction(debug: "OnVoterConfirmation"))
             {
+                _logger.Operations("Apply OpenWriteTransaction");
                 if (_engine.ForTestingPurposes?.LeaderLock != null)
                     tx.InnerTransaction.LowLevelTransaction.OnDispose += _ => _engine.ForTestingPurposes?.LeaderLock?.Complete();
 
@@ -523,6 +526,7 @@ namespace Raven.Server.Rachis
                     Console.WriteLine($"Commiting from {_lastCommit} to {maxIndexOnQuorum} took {elapsed}");
 
                 _lastCommit = maxIndexOnQuorum;
+                _logger.Operations("Apply Close WriteTransaction");
             }
             
             foreach (var kvp in _entries)
@@ -675,6 +679,9 @@ namespace Raven.Server.Rachis
 
         private readonly AsyncManualResetEvent _waitForCommit = new AsyncManualResetEvent();
 
+        Logger _logger = LoggingSource.Instance.GetLogger("Leader", "Leader");
+
+        
         public async Task<(long Index, object Result)> PutAsync(CommandBase command, TimeSpan timeout)
         {
             var rachisMergedCommand = new RachisMergedCommand
@@ -682,6 +689,8 @@ namespace Raven.Server.Rachis
                 Command = command,
                 Tcs = new TaskCompletionSource<Task<(long, object)>>(TaskCreationOptions.RunContinuationsAsynchronously)
             };
+            if(command is ClusterTransactionCommand clusterTransactionCommand)
+                clusterTransactionCommand.WriteTime($"Enqueue {_commandsQueue.Count} {GetHashCode()}", _engine.Tag);
             _commandsQueue.Enqueue(rachisMergedCommand);
 
             while (rachisMergedCommand.Tcs.Task.IsCompleted == false)
@@ -693,7 +702,9 @@ namespace Raven.Server.Rachis
                     Monitor.TryEnter(_commandsQueue, ref lockTaken);
                     if (lockTaken)
                     {
+                        _logger.Operations("EmptyQueue");
                         EmptyQueue();
+                        _logger.Operations("After EmptyQueue");
                     }
                     else
                     {
@@ -709,6 +720,15 @@ namespace Raven.Server.Rachis
                             await rachisMergedCommand.Tcs.Task;
                         }
                     }
+                }
+                catch (Exception e)
+                {
+                    if (lockTaken)
+                    {
+                        _logger.Operations("After EmptyQueue", e);
+                    }
+
+                    throw;
                 }
                 finally
                 {
@@ -741,12 +761,18 @@ namespace Raven.Server.Rachis
             {
                 try
                 {
-                    using (context.OpenWriteTransaction())
+                    using (context.OpenWriteTransaction(debug: "EmptyQueue"))
                     {
+                        _logger.Operations("OpenWriteTransaction");
+
                         var cmdsCount = 0;
                         _engine.GetLastCommitIndex(context, out var lastCommitted, out _);
                         while (cmdsCount++ < 128 && _commandsQueue.TryDequeue(out var cmd))
                         {
+                            {
+                                if(cmd.Command is ClusterTransactionCommand clusterTransactionCommand)
+                                    clusterTransactionCommand.WriteTime("Dequeue", _engine.Tag);
+                            }
                             if (cmd.Consumed.Raise() == false)
                             {
                                 // if the command was aborted due to timeout, we should skip it.
@@ -827,9 +853,16 @@ namespace Raven.Server.Rachis
                 }
                 catch (Exception e)
                 {
+
                     if (_running.IsRaised() == false)
                     {
+                        _logger.Operations("Got exception in EmptyQueue. IsRaised = false", e);
+
                         e = new NotLeadingException(leaderDisposedMessage, e);
+                    }
+                    else
+                    {
+                        _logger.Operations("Got exception in EmptyQueue", e);
                     }
                     foreach (var tcs in list)
                     {
@@ -1033,7 +1066,7 @@ namespace Raven.Server.Rachis
                 try
                 {
                     using (_engine.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-                    using (context.OpenWriteTransaction())
+                    using (context.OpenWriteTransaction(debug: "TryModifyTopology"))
                     {
                         var clusterTopology = _engine.GetTopology(context);
 

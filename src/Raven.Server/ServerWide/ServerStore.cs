@@ -3117,6 +3117,8 @@ namespace Raven.Server.ServerWide
 
             try
             {
+                if(cmd is ClusterTransactionCommand clusterTransactionCommand)
+                    clusterTransactionCommand.WriteTime("Just Before ExecuteAsync", NodeTag);
                 await _clusterRequestExecutor.ExecuteAsync(command, context, token: ServerShutdown);
             }
             catch
@@ -3149,6 +3151,7 @@ namespace Raven.Server.ServerWide
 
             public PutRaftCommand(BlittableJsonReaderObject command, string source, string commandType)
             {
+                //TODO Maybe to set the guid to the guid of the nested command
                 _command = command;
                 _source = source;
                 _commandType = commandType;

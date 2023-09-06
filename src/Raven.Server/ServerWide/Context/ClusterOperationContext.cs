@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Sparrow.Logging;
 using Sparrow.Threading;
 using Voron;
 using Voron.Impl;
@@ -33,21 +34,30 @@ namespace Raven.Server.ServerWide.Context
             return new ClusterTransaction(Environment.ReadTransaction(PersistentContext, Allocator), _changes);
         }
 
-        protected override ClusterTransaction CreateWriteTransaction(TimeSpan? timeout = null)
+        protected override ClusterTransaction CreateWriteTransaction(TimeSpan? timeout = null, string debug = null)
         {
-            return new ClusterTransaction(Environment.WriteTransaction(PersistentContext, Allocator, timeout), _changes);
+            return new ClusterTransaction(Environment.WriteTransaction(PersistentContext, Allocator, timeout), _changes, debug);
         }
     }
 
     public class ClusterTransaction : RavenTransaction
     {
+        private static Logger _log = LoggingSource.Instance.GetLogger("ClusterTransaction", "ClusterTransaction");
         private List<CompareExchangeChange> _compareExchangeNotifications;
 
         protected readonly ClusterChanges _clusterChanges;
+        private readonly string _debug;
+        private readonly Stopwatch _stopwatch; 
 
-        public ClusterTransaction(Transaction transaction, ClusterChanges clusterChanges)
+        public ClusterTransaction(Transaction transaction, ClusterChanges clusterChanges, string debug = null)
             : base(transaction)
         {
+            _debug = debug;
+            if (transaction is {IsWriteTransaction: true})
+            {
+                _stopwatch = Stopwatch.StartNew();
+                _log.Operations($"Create ClusterTransaction _debug:{_debug}");
+            }
             _clusterChanges = clusterChanges ?? throw new System.ArgumentNullException(nameof(clusterChanges));
         }
 
@@ -73,6 +83,17 @@ namespace Raven.Server.ServerWide.Context
                 {
                     _clusterChanges.RaiseNotifications(notification);
                 }
+            }
+        }
+
+        public override void Dispose()
+        {
+            base.Dispose();
+            if(_stopwatch != default)
+            {
+                _stopwatch.Stop();
+                if(_stopwatch.ElapsedMilliseconds > 1000)
+                    _log.Operations($"Dispose ClusterTransaction _debug:{_debug} {_stopwatch.ElapsedMilliseconds}");
             }
         }
     }

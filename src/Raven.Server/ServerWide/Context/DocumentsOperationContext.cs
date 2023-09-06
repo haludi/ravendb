@@ -95,7 +95,7 @@ namespace Raven.Server.ServerWide.Context
                 _documentDatabase.Changes);
         }
 
-        protected override DocumentsTransaction CreateWriteTransaction(TimeSpan? timeout = null)
+        protected override DocumentsTransaction CreateWriteTransaction(TimeSpan? timeout = null, string debug = null)
         {
             var tx = new DocumentsTransaction(this,
                 _documentDatabase.DocumentsStorage.Environment.WriteTransaction(PersistentContext, Allocator, timeout),

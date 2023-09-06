@@ -60,6 +60,9 @@ namespace Raven.Server.Documents.Handlers.Admin
                         case CompareExchangeCommandBase cmpExchange:
                             cmpExchange.ContextToWriteResult = context;
                             break;
+                        case ClusterTransactionCommand clusterTransactionCommand:
+                            clusterTransactionCommand.WriteTime("Leader Handler", ServerStore.NodeTag);
+                            break;
                     }
                     if (TrafficWatchManager.HasRegisteredClients)
                         AddStringToHttpContext(commandJson.ToString(), TrafficWatchChangeType.ClusterCommands);

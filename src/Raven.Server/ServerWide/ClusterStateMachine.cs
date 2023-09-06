@@ -937,6 +937,7 @@ namespace Raven.Server.ServerWide
             try
             {
                 clusterTransaction = (ClusterTransactionCommand)JsonDeserializationCluster.Commands[nameof(ClusterTransactionCommand)](cmd);
+                clusterTransaction.WriteTime("Execute", _parent.Tag);
                 var dbTopology = UpdateDatabaseRecordId(context, index, clusterTransaction);
 
                 if (clusterTransaction.SerializedDatabaseCommands != null &&

@@ -291,7 +291,7 @@ namespace Raven.Server.Rachis
                 _engine.Log.Info($"{ToString()}: Ready to start tx in {sp.Elapsed}");
             }
 
-            using (var tx = context.OpenWriteTransaction())
+            using (var tx = context.OpenWriteTransaction(debug:"ApplyLeaderStateToLocalState"))
             {
                 _engine.ValidateTerm(_term);
 
@@ -559,7 +559,7 @@ namespace Raven.Server.Rachis
         {
             Task onFullSnapshotInstalledTask = null;
 
-            using (context.OpenWriteTransaction())
+            using (context.OpenWriteTransaction(debug:"ReadAndCommitSnapshot"))
             {
                 var lastTerm = _engine.GetTermFor(context, snapshot.LastIncludedIndex);
                 var lastCommitIndex = _engine.GetLastEntryIndex(context);

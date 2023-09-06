@@ -32,7 +32,7 @@ namespace Raven.Server.ServerWide.Context
             return new RavenTransaction(Environment.ReadTransaction(PersistentContext, Allocator));
         }
 
-        protected override RavenTransaction CreateWriteTransaction(TimeSpan? timeout = null)
+        protected override RavenTransaction CreateWriteTransaction(TimeSpan? timeout = null, string debug = null)
         {
             return new RavenTransaction(Environment.WriteTransaction(PersistentContext, Allocator, timeout));
         }
@@ -116,16 +116,16 @@ namespace Raven.Server.ServerWide.Context
 
         protected abstract TTransaction CreateReadTransaction();
 
-        protected abstract TTransaction CreateWriteTransaction(TimeSpan? timeout = null);
+        protected abstract TTransaction CreateWriteTransaction(TimeSpan? timeout = null, string debug = null);
 
-        public TTransaction OpenWriteTransaction(TimeSpan? timeout = null)
+        public TTransaction OpenWriteTransaction(TimeSpan? timeout = null, string debug = null)
         {
             if (Transaction != null && Transaction.Disposed == false)
             {
                 ThrowTransactionAlreadyOpened();
             }
 
-            Transaction = CreateWriteTransaction(timeout);
+            Transaction = CreateWriteTransaction(timeout, debug);
 
             return Transaction;
         }

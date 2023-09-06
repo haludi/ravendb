@@ -446,7 +446,7 @@ namespace Raven.Server.Rachis
 
                 ClusterTopology topology;
                 using (ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-                using (var tx = context.OpenWriteTransaction())
+                using (var tx = context.OpenWriteTransaction(debug: "Initialize"))
                 {
                     _tag = ReadNodeTag(context);
 
@@ -669,7 +669,7 @@ namespace Raven.Server.Rachis
         public void SetNewState(RachisState rachisState, IDisposable disposable, long expectedTerm, string stateChangedReason, Action beforeStateChangedEvent = null, bool asyncDispose = true)
         {
             using (ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-            using (context.OpenWriteTransaction()) // we use the write transaction lock here
+            using (context.OpenWriteTransaction(debug: "SetNewState")) // we use the write transaction lock here
             {
                 SetNewStateInTx(context, rachisState, disposable, expectedTerm, stateChangedReason, beforeStateChangedEvent, asyncDispose);
                 context.Transaction.Commit();
@@ -1002,7 +1002,7 @@ namespace Raven.Server.Rachis
         public void AppendStateDisposable(IDisposable parentState, IDisposable disposeOnStateChange)
         {
             using (ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-            using (context.OpenWriteTransaction()) // using write tx just for the lock here
+            using (context.OpenWriteTransaction(debug: "AppendStateDisposable")) // using write tx just for the lock here
             {
                 if (_disposables.Count == 0 || ReferenceEquals(_disposables[0], parentState) == false)
                     throw new ConcurrencyException(
@@ -1017,7 +1017,7 @@ namespace Raven.Server.Rachis
                 return;
 
             using (ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-            using (context.OpenWriteTransaction()) // using write tx just for the lock here
+            using (context.OpenWriteTransaction(debug:"RemoveAndDispose")) // using write tx just for the lock here
             using (disposable)
             {
                 if (_disposables.Count == 0 || ReferenceEquals(_disposables[0], parentState) == false)
@@ -1064,7 +1064,7 @@ namespace Raven.Server.Rachis
             {
                 Timeout.DisableTimeout();
                 using (ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-                using (var ctx = context.OpenWriteTransaction())
+                using (var ctx = context.OpenWriteTransaction(debug: "SwitchToCandidateState"))
                 {
                     var clusterTopology = GetTopology(context);
                     if (clusterTopology.TopologyId == null ||
@@ -1272,7 +1272,7 @@ namespace Raven.Server.Rachis
                     if (_tag == InitialTag)
                     {
                         using (ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-                        using (context.OpenWriteTransaction())
+                        using (context.OpenWriteTransaction(debug: "AcceptNewConnection"))
                         {
                             if (_tag == InitialTag)// double checked locking under tx write lock
                             {
@@ -1976,7 +1976,7 @@ namespace Raven.Server.Rachis
 
             using (ContextPool.AllocateOperationContext(out ClusterOperationContext context))
             {
-                using (var tx = context.OpenWriteTransaction())
+                using (var tx = context.OpenWriteTransaction(debug:"FoundAboutHigherTerm"))
                 {
                     // we check it here again because now we are under the tx lock, so we can't get into concurrency issues
                     if (term <= CurrentTerm)
@@ -2099,7 +2099,7 @@ namespace Raven.Server.Rachis
                 throw new ArgumentNullException(nameof(selfUrl));
 
             using (ContextPool.AllocateOperationContext(out ClusterOperationContext ctx))
-            using (var tx = ctx.OpenWriteTransaction())
+            using (var tx = ctx.OpenWriteTransaction(debug:"Bootstrap"))
             {
                 if (CurrentState != RachisState.Passive)
                     return false;

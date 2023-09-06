@@ -250,7 +250,7 @@ namespace Raven.Server.Rachis
         private void CastVoteForSelf(long electionTerm, string reason, bool setStateChange = true)
         {
             using (_engine.ContextPool.AllocateOperationContext(out ClusterOperationContext context))
-            using (var tx = context.OpenWriteTransaction())
+            using (var tx = context.OpenWriteTransaction(debug:"CastVoteForSelf"))
             {
                 _engine.CastVoteInTerm(context, electionTerm, _engine.Tag, reason);
 

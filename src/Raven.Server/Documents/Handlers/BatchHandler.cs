@@ -238,8 +238,11 @@ namespace Raven.Server.Documents.Handlers
                 throw new DatabaseNotRelevantException("Cluster transaction can't be handled by a promotable node.");
 
             var clusterTransactionCommand = new ClusterTransactionCommand(Database.Name, Database.IdentityPartsSeparator, topology, command.ParsedCommands, options, raftRequestId);
+            clusterTransactionCommand.Start = DateTime.Now;
+            clusterTransactionCommand.OriginTag = ServerStore.NodeTag;
             var result = await ServerStore.SendToLeaderAsync(clusterTransactionCommand);
 
+            clusterTransactionCommand.WriteTime("after sent to leader", ServerStore.NodeTag);
             if (result.Result is List<ClusterTransactionCommand.ClusterTransactionErrorInfo> errors)
             {
                 HttpContext.Response.StatusCode = (int)HttpStatusCode.Conflict;
@@ -251,6 +254,7 @@ namespace Raven.Server.Documents.Handlers
 
             // wait for the command to be applied on this node
             await ServerStore.WaitForCommitIndexChange(RachisConsensus.CommitIndexModification.GreaterOrEqual, result.Index);
+            clusterTransactionCommand.WriteTime("after WaitForCommitIndexChange", ServerStore.NodeTag);
 
             var array = new DynamicJsonArray();
             if (clusterTransactionCommand.DatabaseCommandsCount > 0)
@@ -260,6 +264,8 @@ namespace Raven.Server.Documents.Handlers
                 using (var cts = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, HttpContext.RequestAborted))
                 {
                     reply = (ClusterTransactionCompletionResult)await Database.ClusterTransactionWaiter.WaitForResults(options.TaskId, cts.Token);
+                    clusterTransactionCommand.WriteTime("after WaitForResults", ServerStore.NodeTag);
+
                 }
                 if (reply.IndexTask != null)
                 {
