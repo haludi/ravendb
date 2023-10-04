@@ -9,11 +9,6 @@ namespace Raven.Server.ServerWide.Commands
     {
         public List<AddOrUpdateCompareExchangeCommand> Commands;
         public List<RemoveCompareExchangeCommand> RemoveCommands;
-        [JsonDeserializationIgnore]
-        public JsonOperationContext ContextToWriteResult;
-
-        [JsonDeserializationIgnore]
-        public Leader.ConvertResultAction ConvertResultAction;
 
         public AddOrUpdateCompareExchangeBatchCommand()
         {
@@ -22,13 +17,11 @@ namespace Raven.Server.ServerWide.Commands
         public AddOrUpdateCompareExchangeBatchCommand(List<AddOrUpdateCompareExchangeCommand> addCommands, JsonOperationContext contextToWriteResult, string uniqueRequestId) : base(uniqueRequestId)
         {
             Commands = addCommands;
-            ContextToWriteResult = contextToWriteResult;
         }
 
         public AddOrUpdateCompareExchangeBatchCommand(List<RemoveCompareExchangeCommand> removeCommands, JsonOperationContext contextToWriteResult, string uniqueRequestId) : base(uniqueRequestId)
         {
             RemoveCommands = removeCommands;
-            ContextToWriteResult = contextToWriteResult;
         }
 
         public override DynamicJsonValue ToJson(JsonOperationContext context)

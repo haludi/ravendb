@@ -1197,37 +1197,5 @@ namespace Raven.Server.Rachis
             public TaskCompletionSource<(long, object)> TaskCompletionSource;
             public Action<TaskCompletionSource<(long, object)>> OnNotify;
         }
-
-        public class ConvertResultAction
-        {
-            private readonly JsonOperationContext _contextToWriteBlittableResult;
-            private readonly ConvertResultFromLeader _action;
-            private readonly SingleUseFlag _timeout = new SingleUseFlag();
-
-            public ConvertResultAction(JsonOperationContext contextToWriteBlittableResult, ConvertResultFromLeader action)
-            {
-                _contextToWriteBlittableResult = contextToWriteBlittableResult ?? throw new ArgumentNullException(nameof(contextToWriteBlittableResult));
-                _action = action ?? throw new ArgumentNullException(nameof(action));
-            }
-
-            public object Apply(object result)
-            {
-                lock (this)
-                {
-                    if (_timeout.IsRaised())
-                        return null;
-
-                    return _action(_contextToWriteBlittableResult, result);
-                }
-            }
-
-            public void AboutToTimeout()
-            {
-                lock (this)
-                {
-                    _timeout.Raise();
-                }
-            }
-        }
     }
 }
