@@ -2844,23 +2844,23 @@ namespace Raven.Server.ServerWide
             return _engine.CurrentState == RachisState.Passive;
         }
 
-        public async Task<(long Index, object Result)> SendToLeaderAsync(CommandBase cmd)
-        {
-            var response = await SendToLeaderAsyncInternal(cmd);
-
-#if DEBUG
-            if (response.Result.ContainsBlittableObject())
-            {
-                throw new InvalidOperationException($"{nameof(ServerStore)}::{nameof(SendToLeaderAsync)}({response.Result}) should not return command results with blittable json objects. This is not supposed to happen and should be reported.");
-            }
-#endif
-
-            return response;
-        }
+//         public async Task<(long Index, object Result)> SendToLeaderAsync(CommandBase cmd)
+//         {
+//             var response = await SendToLeaderAsyncInternal(cmd);
+//
+// #if DEBUG
+//             if (response.Result.ContainsBlittableObject())
+//             {
+//                 throw new InvalidOperationException($"{nameof(ServerStore)}::{nameof(SendToLeaderAsync)}({response.Result}) should not return command results with blittable json objects. This is not supposed to happen and should be reported.");
+//             }
+// #endif
+//
+//             return response;
+//         }
 
         //this is needed for cases where Result or any of its fields are blittable json.
         //(for example, this is needed for use with AddOrUpdateCompareExchangeCommand, since it returns BlittableJsonReaderObject as result)
-        public Task<(long Index, object Result)> SendToLeaderAsync(JsonOperationContext context, CommandBase cmd)
+        public Task<(long Index, object Result)> SendToLeaderAsync(CommandBase cmd)
         {
             return SendToLeaderAsyncInternal(cmd);
         }
