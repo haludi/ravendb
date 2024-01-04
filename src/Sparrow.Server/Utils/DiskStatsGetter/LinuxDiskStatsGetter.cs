@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 using Mono.Unix.Native;
@@ -53,11 +54,16 @@ internal class LinuxDiskStatsGetter : DiskStatsGetter<LinuxDiskStatsRawResult>
     {
         if (Syscall.stat(path, out var stats) != 0)
         {
+            
             var errno = Stdlib.GetLastError();
-            var errorBuilder = new StringBuilder();
-            Syscall.strerror_r(errno, errorBuilder,1024);
-            errorBuilder.Insert(0, $"Failed to get stat for \"{path}\" : ");
-            throw new InvalidOperationException(errorBuilder.ToString());
+            unsafe
+            {
+                const int bufferSize = 1024;
+                var buffer = stackalloc char[bufferSize];
+                strerror_r(errno, buffer, (ulong)buffer);
+                var result = new string(buffer);
+                throw new InvalidOperationException($"Failed to get stat for \"{path}\" : {result}");
+            }
         }
             
         var deviceId = (stats.st_mode & FilePermissions.S_IFBLK) == FilePermissions.S_IFBLK
@@ -72,7 +78,15 @@ internal class LinuxDiskStatsGetter : DiskStatsGetter<LinuxDiskStatsRawResult>
         minor |= (deviceId & 0x00000ffffff00000u) >> 12;
         return (major, minor);
     }
-        
+     
+    [DllImport("MonoPosixHelper", EntryPoint = "Mono_Posix_Syscall_strerror_r", SetLastError = true)]
+    private static extern unsafe int sys_strerror_r(int errnum, [Out] char* buf, ulong n);
+
+    public static unsafe int strerror_r(Errno errnum, char* buf, ulong n)
+    {
+        return sys_strerror_r(NativeConvert.FromErrno(errnum), buf, n);
+    }
+    
     private static LinuxDiskStatsRawResult ReadParse(FileStream fileStream)
     {
         const int maxLongLength = 19;
