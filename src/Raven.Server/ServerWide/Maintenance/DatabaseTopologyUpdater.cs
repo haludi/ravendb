@@ -609,6 +609,12 @@ namespace Raven.Server.ServerWide.Maintenance
                 return (false, null);
             }
 
+            if (mentorPrevDbStats.Status == DatabaseStatus.Loading)
+            {
+                _logger.Log($"Can't promote node {promotable}, previous stats for mentor {mentorNode} show the database is still loading", state.ObserverIteration, database: dbName);
+                return (false, null);
+            }
+            
             if (previous.TryGetValue(promotable, out var promotablePrevClusterStats) == false ||
                 promotablePrevClusterStats.Report.TryGetValue(dbName, out var promotablePrevDbStats) == false)
             {
