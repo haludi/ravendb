@@ -70,10 +70,8 @@ using Constants = Raven.Client.Constants;
 using MountPointUsage = Raven.Client.ServerWide.Operations.MountPointUsage;
 using Size = Raven.Client.Util.Size;
 using System.Diagnostics.CodeAnalysis;
-using Raven.Server.Documents.AI;
 using Raven.Server.Documents.AI.Embeddings;
-using Raven.Server.Logging;
-using Raven.Server.Rachis;
+using Raven.Server.Documents.SchemaValidation;
 using Sparrow.Server.Logging;
 using Sparrow.Server.Utils;
 
@@ -311,6 +309,8 @@ namespace Raven.Server.Documents
 
         public PeriodicBackupRunner PeriodicBackupRunner { get; private set; }
 
+        public SchemaValidatorCache SchemaValidatorCache { get; private set; }
+
         public TombstoneCleaner TombstoneCleaner { get; private set; }
 
         public RevisionsBinCleaner RevisionsBinCleaner { get; set; }
@@ -446,6 +446,7 @@ namespace Raven.Server.Documents
 
                 ReplicationLoader = CreateReplicationLoader();
                 PeriodicBackupRunner = new PeriodicBackupRunner(this, _serverStore, wakeup);
+                SchemaValidatorCache = new SchemaValidatorCache(DocumentsStorage.ContextPool, Loggers.GetLogger<SchemaValidatorCache>());
 
                 _addToInitLog(LogLevel.Debug, "Initializing IndexStore (async)");
                 _indexStoreTask = IndexStore.InitializeAsync(record, index, _addToInitLog);
@@ -1241,6 +1242,13 @@ namespace Raven.Server.Documents
             });
             ForTestingPurposes?.DisposeLog?.Invoke(Name, "Disposed PeriodicBackupRunner");
 
+            ForTestingPurposes?.DisposeLog?.Invoke(Name, "Disposing SchemaValidatorCache");
+            exceptionAggregator.Execute(() =>
+            {
+                SchemaValidatorCache?.Dispose();
+            });
+            ForTestingPurposes?.DisposeLog?.Invoke(Name, "Disposed SchemaValidatorCache");
+
             ForTestingPurposes?.DisposeLog?.Invoke(Name, "Disposing TombstoneCleaner");
             exceptionAggregator.Execute(() =>
             {
@@ -1739,6 +1747,7 @@ namespace Raven.Server.Documents
             try
             {
                 PeriodicBackupRunner?.UpdateConfigurations(record.PeriodicBackups);
+                SchemaValidatorCache?.Update(record.SchemaValidation);
                 EmbeddingsGeneratorQueries?.HandleDatabaseRecordChange(record);
                 EmbeddingsGeneratorEtl?.HandleDatabaseRecordChange(record);
                 EtlLoader?.HandleDatabaseRecordChange(record);

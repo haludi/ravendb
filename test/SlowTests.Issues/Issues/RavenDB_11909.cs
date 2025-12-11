@@ -89,7 +89,7 @@ namespace SlowTests.Issues
         [RavenFact(RavenTestCategory.Configuration)]
         public void ThrowOnDatabaseRecordChanges()
         {
-            const int numberOfFields = 51;
+            const int numberOfFields = 52;
             const int numberOfProperties = 1;
 
             var tasksList = new List<string>
@@ -106,7 +106,8 @@ namespace SlowTests.Issues
                 nameof(DatabaseRecord.QueueSinks),
                 nameof(DatabaseRecord.SnowflakeEtls),
                 nameof(DatabaseRecord.EmbeddingsGenerations),
-                nameof(DatabaseRecord.GenAis)
+                nameof(DatabaseRecord.GenAis),
+                nameof(DatabaseRecord.SchemaValidation)
             };
 
             var dbRecordType = typeof(DatabaseRecord);

@@ -91,6 +91,32 @@ public sealed class DatabaseRecordActions : IDatabaseRecordActions
             result.DatabaseRecord.ConflictSolverConfigUpdated = true;
         }
 
+        if (databaseRecord.SchemaValidation != null && databaseRecordItemType.HasFlag(DatabaseRecordItemType.SchemaValidation))
+        {
+            if (_log.IsInfoEnabled)
+                _log.Info("Configuring schema validation configuration from smuggler");
+
+            if (_currentDatabaseRecord?.SchemaValidation != null)
+            {
+                foreach (var collection in _currentDatabaseRecord.SchemaValidation.ValidatorsPerCollection)
+                {
+                    if (databaseRecord.SchemaValidation.ValidatorsPerCollection.TryGetValue(collection.Key, out var collectionConfiguration) == false)
+                    {
+                        databaseRecord.SchemaValidation.ValidatorsPerCollection.Add(collection.Key, collection.Value);
+                    }
+                    else
+                    {
+                        if (collectionConfiguration.Equals(collection.Value) == false)
+                            result.AddWarning($"Schema validation configuration of collection '{collection.Key}' already exist on the destination Database Record. " +
+                                              "Configuring this schema validation from smuggler was skipped, even though the configuration differed from the configuration in the target database record");
+                    }
+                }
+            }
+
+            tasks.Add(_server.SendToLeaderAsync(new EditSchemaValidationConfigurationCommand(databaseRecord.SchemaValidation, _name, RaftIdGenerator.DontCareId)));
+            result.DatabaseRecord.SchemaValidationConfigUpdated = true;
+        }
+
         if (databaseRecord.PeriodicBackups.Count > 0 && databaseRecordItemType.HasFlag(DatabaseRecordItemType.PeriodicBackups))
         {
             if (authenticationEnabled && CanAccess(authorizationStatus) == false)
