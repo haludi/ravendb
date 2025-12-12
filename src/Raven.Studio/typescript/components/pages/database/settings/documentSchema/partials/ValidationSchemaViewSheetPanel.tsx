@@ -221,13 +221,13 @@ export function ValidationSchemaViewSheetPanel({ validators }: ValidationSchemaV
                                     />
                                 </FormGroup>
                                 <FormGroup>
-                                    <FormLabel>Maximum error messages to return</FormLabel>
+                                    <FormLabel>Maximum error messages to return (per collection)</FormLabel>
                                     <FormInput
                                         name="maxErrorMessages"
                                         control={control}
                                         disabled={isTestSettingsDisabled}
                                         placeholder="e.g. 1000 (default: unlimited)"
-                                        addon="documents"
+                                        addon="errors"
                                         type="text"
                                     />
                                 </FormGroup>
