@@ -204,30 +204,29 @@ export function ValidationSchemaViewSheetPanel({ validators }: ValidationSchemaV
                             <FormSwitch color="primary" control={control} name="isTestSettingsEnabled">
                                 Test settings
                             </FormSwitch>
-                            <div>Specify maximum documents and run time - leave unset for unlimited.</div>
                             <div
                                 className={classNames("mt-2", {
                                     "item-disabled": isTestSettingsDisabled,
                                 })}
                             >
                                 <FormGroup>
-                                    <FormLabel>Max documents to scan (per collection)</FormLabel>
+                                    <FormLabel>Maximum documents to scan (per collection)</FormLabel>
                                     <FormInput
                                         name="maxDocumentsToValidate"
                                         control={control}
                                         disabled={isTestSettingsDisabled}
                                         addon="documents"
-                                        placeholder="e.g. 1000"
+                                        placeholder="e.g. 1000 (default: unlimited)"
                                         type="text"
                                     />
                                 </FormGroup>
                                 <FormGroup>
-                                    <FormLabel>Max error messages to return</FormLabel>
+                                    <FormLabel>Maximum error messages to return</FormLabel>
                                     <FormInput
                                         name="maxErrorMessages"
                                         control={control}
                                         disabled={isTestSettingsDisabled}
-                                        placeholder="e.g. 1000"
+                                        placeholder="e.g. 1000 (default: unlimited)"
                                         addon="documents"
                                         type="text"
                                     />
@@ -443,7 +442,9 @@ function ValidationStatusMessage({ validators, monitorOperationProgress }: Valid
     }
 
     if (isEmpty(monitorOperationProgress)) {
-        return <div>You&#39;re about to run the validation schema test on these collections:</div>;
+        return (
+            <div>You&#39;re about to test your documents against the sample schema for the following collections:</div>
+        );
     }
 
     const totalErrors = validators.reduce((sum, v) => {
@@ -458,7 +459,7 @@ function ValidationStatusMessage({ validators, monitorOperationProgress }: Valid
                     {totalErrors} invalid document
                     {totalErrors !== 1 ? "s " : " "}
                 </b>
-                <span>been found according to the defined document schemas.</span>
+                <span>has been found based on the sample schemas.</span>
             </div>
         );
     }
@@ -469,7 +470,7 @@ function ValidationStatusMessage({ validators, monitorOperationProgress }: Valid
                 <Icon icon="check" />
                 <b>All documents validated successfully </b>
             </span>
-            <span>against the defined schemas with no errors found.</span>
+            <span>against the sample schemas. No errors found.</span>
         </div>
     );
 }
@@ -500,7 +501,12 @@ function ValidationDocumentCountDisplay({
     }
 
     const docCount = getCollectionDocumentCount(collectionName, collections);
-    return <span> ({docCount}) documents</span>;
+    return (
+        <span>
+            {" "}
+            ({docCount}) document{docCount === 1 ? "" : "s"}
+        </span>
+    );
 }
 
 interface ValidationCollectionAccordionItemProps {

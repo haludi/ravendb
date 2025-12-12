@@ -71,8 +71,10 @@ export default function DocumentSchemaPlayground() {
                     <form onSubmit={handleSubmit(handleOpenSheet)}>
                         <AboutViewHeading marginBottom={4} title="Document Schema Playground" icon="rocket" />
                         <span>
-                            Quickly create and test schemas against your documents without affecting your saved data.
-                            The Schema Playground is a temporary workspace designed for safe experimentation.
+                            Quickly create and test schemas against your documents without affecting saved schema
+                            definitions.
+                            <br />
+                            The Schema Playground is a temporary workspace where you can safely try out schemas.
                         </span>
 
                         <div className="mt-5 d-flex align-items-center justify-content-between">
@@ -102,8 +104,8 @@ export default function DocumentSchemaPlayground() {
                                 }
                             >
                                 <Icon icon="documents" />
-                                <span>Collection specific document schemas</span>
-                                <PopoverWithHoverWrapper message="info">
+                                <span>Sample document schemas per collection</span>
+                                <PopoverWithHoverWrapper message="Define sample schemas to test against existing documents">
                                     <Icon icon="info" color="info" margin="ms-1" />
                                 </PopoverWithHoverWrapper>
                             </HrHeader>
@@ -117,8 +119,7 @@ export default function DocumentSchemaPlayground() {
                     </form>
                 </Col>
                 <Col sm={12} lg={4}>
-                    {/*TODO: remove if about view is finished*/}
-                    {false && <DocumentSchemaPlaygroundAboutView />}
+                    {<DocumentSchemaPlaygroundAboutView />}
                 </Col>
             </Row>
         </div>
@@ -146,7 +147,7 @@ function TestDocumentSchema({ index, remove }: ExtendedFieldArrayWithId) {
         <RichPanel>
             <RichPanelHeader>
                 <RichPanelInfo>
-                    <RichPanelName>Document schema {index + 1}</RichPanelName>
+                    <RichPanelName>Sample document schema {index + 1}</RichPanelName>
                 </RichPanelInfo>
                 <RichPanelActions>
                     <Button onClick={() => remove(index)} variant="danger">
@@ -172,7 +173,10 @@ function TestDocumentSchema({ index, remove }: ExtendedFieldArrayWithId) {
                                 />
                             </FormGroup>
                             <FormLabel>
-                                Document schema <Icon icon="info" color="info" margin="m-0" />
+                                Document schema{" "}
+                                <PopoverWithHoverWrapper message="Enter a JSON schema to test against the selected collection. It will not be saved or modify existing schema definitions.">
+                                    <Icon icon="info" color="info" margin="m-0" />
+                                </PopoverWithHoverWrapper>
                             </FormLabel>
                             <FormAceEditor
                                 control={control}

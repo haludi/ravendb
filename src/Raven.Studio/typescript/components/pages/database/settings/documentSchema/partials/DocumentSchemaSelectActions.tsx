@@ -234,7 +234,11 @@ export default function DocumentSchemaSelectActions() {
                     </div>
                 )}
                 <div className="d-flex gap-2 align-items-center">
-                    <a className="btn btn-secondary rounded-pill" href={urls.documentSchemaPlayground()}>
+                    <a
+                        className="btn btn-secondary rounded-pill"
+                        href={urls.documentSchemaPlayground()}
+                        title="Open the playground to test sample schemas against existing documents"
+                    >
                         <Icon icon="rocket" />
                         Schema Playground
                     </a>
