@@ -10,6 +10,7 @@ using Raven.Client.Exceptions;
 using Raven.Client.Exceptions.Documents;
 using Raven.Client.Exceptions.Documents.Attachments;
 using Raven.Client.Json.Serialization;
+using Raven.Server.Documents.Handlers.Processors.Attachments;
 using Raven.Server.Documents.Replication.ReplicationItems;
 using Raven.Server.ServerWide.Context;
 using Raven.Server.Utils;
@@ -140,7 +141,7 @@ namespace Raven.Server.Documents
             if (context.Transaction == null)
             {
                 DocumentPutAction.ThrowRequiresTransaction();
-                Debug.Assert(false);// never hit
+                Debug.Assert(false); // never hit
             }
 
             // Attachment etag should be generated before updating the document
@@ -174,6 +175,7 @@ namespace Raven.Server.Documents
                     Debug.Assert(changeVector != null);
 
                     var table = context.Transaction.InnerTransaction.OpenTable(AttachmentsSchema, AttachmentsMetadataSlice);
+
                     void SetTableValue(TableValueBuilder tvb, Slice cv)
                     {
                         tvb.Add(keySlice.Content.Ptr, keySlice.Size);
@@ -233,7 +235,8 @@ namespace Raven.Server.Documents
                                         var shouldVersionOldDoc = _documentsStorage.RevisionsStorage.ShouldVersionOldDocument(context, doc.Flags, doc.Data, docChangeVector, collection);
                                         if (shouldVersionOldDoc)
                                         {
-                                            _documentsStorage.RevisionsStorage.Put(context, documentId, doc.Data, doc.Flags | DocumentFlags.HasRevisions | DocumentFlags.FromOldDocumentRevision, NonPersistentDocumentFlags.None, docChangeVector, doc.LastModified.Ticks, configuration, collection);
+                                            _documentsStorage.RevisionsStorage.Put(context, documentId, doc.Data, doc.Flags | DocumentFlags.HasRevisions | DocumentFlags.FromOldDocumentRevision, NonPersistentDocumentFlags.None, docChangeVector,
+                                                doc.LastModified.Ticks, configuration, collection);
                                         }
                                     }
                                 }
@@ -311,6 +314,7 @@ namespace Raven.Server.Documents
             {
                 changeVector = _documentsStorage.GetNewChangeVector(context, newEtag);
             }
+
             Debug.Assert(changeVector != null);
             DeleteTombstoneIfNeeded(context, key);
 
@@ -534,6 +538,7 @@ namespace Raven.Server.Documents
             {
                 throw new InvalidOperationException($"Cannot put/delete an attachment {name} on a document '{documentId}' when it has an unresolved conflict.", e);
             }
+
             return hasDoc;
         }
 
@@ -600,6 +605,7 @@ namespace Raven.Server.Documents
                     });
                 }
             }
+
             return attachments;
         }
 
@@ -621,6 +627,7 @@ namespace Raven.Server.Documents
                     });
                 }
             }
+
             return attachments;
         }
 
@@ -812,7 +819,8 @@ namespace Raven.Server.Documents
             };
         }
 
-        public AttachmentDetailsServer CopyAttachment(DocumentsOperationContext context, string documentId, string name, string destinationId, string destinationName, LazyStringValue changeVector, AttachmentType attachmentType, bool extractCollectionName = false)
+        public AttachmentDetailsServer CopyAttachment(DocumentsOperationContext context, string documentId, string name, string destinationId, string destinationName, LazyStringValue changeVector, AttachmentType attachmentType,
+            bool extractCollectionName = false)
         {
             if (string.IsNullOrWhiteSpace(documentId))
                 throw new ArgumentException("Argument cannot be null or whitespace.", nameof(documentId));
@@ -833,7 +841,45 @@ namespace Raven.Server.Documents
             return PutAttachment(context, destinationId, destinationName, attachment.ContentType, hash, string.Empty, attachment.Stream, extractCollectionName: extractCollectionName);
         }
 
-        public MoveAttachmentDetailsServer MoveAttachment(DocumentsOperationContext context, string sourceDocumentId, string sourceName, string destinationDocumentId, string destinationName, LazyStringValue changeVector, string hash = null, string contentType = null, bool usePartialKey = true, bool updateDocument = true, bool extractCollectionName = false)
+        public Attachment GetAttachmentByEtag(DocumentsOperationContext context, long etag)
+        {
+            var table = context.Transaction.InnerTransaction.OpenTable(AttachmentsSchema, AttachmentsMetadataSlice);
+            var index = AttachmentsSchema.FixedSizeIndexes[AttachmentsEtagSlice];
+
+            if (table.Read(context.Allocator, index, etag, out var tvr) == false)
+                return null;
+
+            return TableValueToAttachment(context, ref tvr);
+        }
+        
+        public IEnumerable<AttachmentInfo> GetAttachments(DocumentsOperationContext context, long etag)
+        {
+            var table = context.Transaction.InnerTransaction.OpenTable(AttachmentsSchema, AttachmentsMetadataSlice);
+
+            foreach (var result in table.SeekForwardFrom(AttachmentsSchema.FixedSizeIndexes[AttachmentsEtagSlice], etag, 0))
+            {
+                var attachment = TableValueToAttachment(context, ref result.Reader);
+
+                using (Slice.From(context.Allocator, attachment.Key, out var keySlice))
+                {
+                    var (docId, _) = AttachmentKey.ExtractDocIdAndAttachmentName(keySlice, out var type);
+
+                    yield return new AttachmentInfo
+                    {
+                        Name = attachment.Name,
+                        Size = GetAttachmentStreamLength(context, attachment.Base64Hash),
+                        Hash = attachment.Base64Hash.ToString(),
+                        DocumentId = docId,
+                        Etag = attachment.Etag,
+                        ChangeVector = attachment.ChangeVector,
+                        Type = type
+                    };
+                }
+            }
+        }
+
+        public MoveAttachmentDetailsServer MoveAttachment(DocumentsOperationContext context, string sourceDocumentId, string sourceName, string destinationDocumentId, string destinationName, LazyStringValue changeVector, string hash = null,
+            string contentType = null, bool usePartialKey = true, bool updateDocument = true, bool extractCollectionName = false)
         {
             if (string.IsNullOrWhiteSpace(sourceDocumentId))
                 throw new ArgumentException("Argument cannot be null or whitespace.", nameof(sourceDocumentId));
@@ -1028,6 +1074,7 @@ namespace Raven.Server.Documents
                     Debug.Assert(false, "Tombstone must be of type attachment");
                     return null;
                 }
+
                 return tombstone;
             }
 
@@ -1039,9 +1086,7 @@ namespace Raven.Server.Documents
         {
             var table = context.Transaction.InnerTransaction.OpenTable(AttachmentsSchema, AttachmentsMetadataSlice);
 
-            if (isPartialKey ?
-                table.SeekOnePrimaryKeyPrefix(key, out TableValueReader tvr) == false :
-                table.ReadByKey(key, out tvr) == false)
+            if (isPartialKey ? table.SeekOnePrimaryKeyPrefix(key, out TableValueReader tvr) == false : table.ReadByKey(key, out tvr) == false)
             {
                 if (expectedChangeVector != null)
                     throw new ConcurrencyException($"Attachment {name} with key '{key}' does not exist, " +
@@ -1072,9 +1117,9 @@ namespace Raven.Server.Documents
             var currentChangeVector = TableValueToChangeVector(context, (int)AttachmentsTable.ChangeVector, ref tvr);
             var etag = TableValueToEtag((int)AttachmentsTable.Etag, ref tvr);
 
-            using (isPartialKey ?
-                TableValueToSlice(context, (int)AttachmentsTable.LowerDocumentIdAndLowerNameAndTypeAndHashAndContentType, ref tvr, out key)
-              : default(ByteStringContext.InternalScope))
+            using (isPartialKey
+                       ? TableValueToSlice(context, (int)AttachmentsTable.LowerDocumentIdAndLowerNameAndTypeAndHashAndContentType, ref tvr, out key)
+                       : default(ByteStringContext.InternalScope))
             using (TableValueToSlice(context, (int)AttachmentsTable.Hash, ref tvr, out Slice hash))
             {
                 if (expectedChangeVector != null && ChangeVector.CompareVersion(currentChangeVector, expectedChangeVector, context) != 0)
@@ -1238,7 +1283,7 @@ namespace Raven.Server.Documents
                 PartialKey,
                 Prefix
             }
-            
+
             private const byte RecordSeparator = SpecialChars.RecordSeparator;
             private const byte DocType = (byte)'d';
             private const byte RevisionType = (byte)'r';
@@ -1257,10 +1302,10 @@ namespace Raven.Server.Documents
                 return (doc, name);
             }
 
-            public static (string DocId, string AttachmentName) ExtractDocIdAndAttachmentName(Slice key)
+            public static (string DocId, string AttachmentName) ExtractDocIdAndAttachmentName(Slice key, out AttachmentType type)
             {
                 var spanKey = key.AsReadOnlySpan();
-                ExtractDocIdAndAttachmentName(spanKey, out int sizeOfDocId, out int attachmentNameIndex, out int sizeOfAttachmentName, out _);
+                ExtractDocIdAndAttachmentName(spanKey, out int sizeOfDocId, out int attachmentNameIndex, out int sizeOfAttachmentName, out type);
 
                 var docId = Encodings.Utf8.GetString(spanKey[..sizeOfDocId]);
                 var attachmentName = Encodings.Utf8.GetString(spanKey.Slice(attachmentNameIndex, sizeOfAttachmentName));
@@ -1274,9 +1319,9 @@ namespace Raven.Server.Documents
                 sizeOfDocId = FindNextSeparator(key, 0);
 
                 var thirdPartIndex = sizeOfDocId +
-                                      1 + // separator
-                                      1 + // type: d
-                                      1;
+                                     1 + // separator
+                                     1 + // type: d
+                                     1;
 
                 int endOfThirdPart = FindNextSeparator(key, thirdPartIndex);
                 byte keyType = key[sizeOfDocId + 1];
@@ -1289,14 +1334,14 @@ namespace Raven.Server.Documents
                         break;
                     case RevisionType:
                         attachmentNameIndex = endOfThirdPart + 1;
-                        sizeOfAttachmentName = FindNextSeparator(key, thirdPartIndex) - attachmentNameIndex;
+                        sizeOfAttachmentName = FindNextSeparator(key, attachmentNameIndex) - attachmentNameIndex;
                         type = AttachmentType.Revision;
                         break;
                     default:
                         throw new InvalidOperationException($"Invalid attachment key type {(char)keyType}({keyType:X}). Key {Encodings.Utf8.GetString(key)}");
                 }
             }
-            
+
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static ByteStringContext.InternalScope GetKey(DocumentsOperationContext context, byte* lowerId, int lowerIdSize,
                 byte* lowerName, int lowerNameSize, Slice base64Hash, byte* lowerContentTypePtr, int lowerContentTypeSize,
@@ -1419,7 +1464,7 @@ namespace Raven.Server.Documents
             {
                 var separatorIndex = FindNextSeparator(key.AsReadOnlySpan(), 0);
                 var typeIndex = separatorIndex + 1;
-                
+
                 if (typeIndex >= key.Size)
                     throw new InvalidOperationException($"Could not parse {nameof(key)}");
 
@@ -1430,7 +1475,7 @@ namespace Raven.Server.Documents
                 Debug.Assert(c == DocType);
                 return AttachmentType.Document;
             }
-            
+
             private static int FindNextSeparator(ReadOnlySpan<byte> key, int start)
             {
                 for (var i = start; i < key.Length; i++)

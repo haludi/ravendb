@@ -1,4 +1,5 @@
 ﻿using System;
+using Raven.Client.Documents.Attachments;
 using Raven.Server.Documents.Replication.ReplicationItems;
 using Raven.Server.Documents.TimeSeries;
 using Sparrow.Json;
@@ -58,7 +59,7 @@ namespace Raven.Server.Documents.Replication
                 case AttachmentReplicationItem a:
                     return $"Attachment '{a.Name}' for {GetDocumentId(a.Key)}";
                 case AttachmentTombstoneReplicationItem at:
-                    var result = AttachmentsStorage.AttachmentKey.ExtractDocIdAndAttachmentName(at.Key);
+                    var result = AttachmentsStorage.AttachmentKey.ExtractDocIdAndAttachmentName(at.Key, out _);
                     return $"Attachment tombstone '{result.AttachmentName}' for {result.DocId}";
                 case CounterReplicationItem c:
                     return $"Counter for {c.Id}";

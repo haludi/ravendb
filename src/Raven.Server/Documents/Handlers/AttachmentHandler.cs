@@ -164,6 +164,15 @@ namespace Raven.Server.Documents.Handlers
                 await processor.ExecuteAsync();
             }
         }
+        
+        [RavenAction("/databases/*/debug/attachments/info", "GET", AuthorizationStatus.ValidUser, EndpointType.Read, DisableOnCpuCreditsExhaustion = true, IsDebugInformationEndpoint = false)]
+        public async Task GetAttachmentsInfo()
+        {
+            using (var processor = new AttachmentHandlerProcessorForGetAttachmentsInfo(this))
+            {
+                await processor.ExecuteAsync();
+            }
+        }
 
         public class MissingAttachmentInfo
         {

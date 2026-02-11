@@ -21,6 +21,14 @@ namespace Raven.Client.Documents.Operations.Attachments
         /// The ID of the document associated with the attachment.
         /// </summary>
         public string DocumentId;
+        
+        internal override DynamicJsonValue ToJson()
+        {
+            var json = base.ToJson();
+            json[nameof(ChangeVector)] = ChangeVector;
+            json[nameof(DocumentId)] = DocumentId;
+            return json;
+        }
     }
 
     internal sealed class AttachmentNameWithCount : AttachmentName
